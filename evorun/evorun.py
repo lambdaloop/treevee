@@ -1082,6 +1082,9 @@ Produce a concise plan following this structure.
         editor_prompt = f"""\
 You are a senior Python developer implementing a code improvement plan.
 
+## Current Codebase
+{self.codebase.get_codebase_prompt(max_size=4000)}
+
 ## Your Plan
 {plan}
 
@@ -1093,7 +1096,7 @@ You are a senior Python developer implementing a code improvement plan.
 2. Implement each change described in the plan faithfully.
 3. Make sure your changes produce valid, runnable Python code.
 4. Preserve working code that is not mentioned in the plan.
-5. Output complete files, not partial diffs.
+5. Use Edit tool for targeted changes where possible.
 6. Do NOT make changes beyond what the plan specifies.
 7. Do not suggest EDA.
 8. Focus on improving the evaluation score.
@@ -1242,7 +1245,7 @@ You are a senior Python developer fixing errors in the codebase.
 2. Follow the fix plan to correct the errors.
 3. Make sure your changes produce valid, runnable Python code.
 4. Preserve working code that is not related to the error.
-5. Output complete files, not partial diffs.
+5. Use Edit tool for targeted changes where possible.
 
 Do not try to improve the score — just fix the errors.
 """
@@ -2638,7 +2641,7 @@ You are implementing a cross-branch fusion plan.
    reference diffs that fit your current architecture.
 3. Preserve what is working in your current solution.
 4. Do NOT blindly combine everything — choose the most relevant technique(s).
-5. Output complete runnable Python files, not just diffs.
+5. Use Edit tool for targeted changes where possible.
 6. Do not suggest EDA.
 
 Focus on quality over quantity: one well-integrated technique is better than
