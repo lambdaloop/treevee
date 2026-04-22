@@ -781,8 +781,8 @@ class EvoRunAgent:
         self._consecutive_no_changes: int = 0
 
         self.use_decay = getattr(args, 'decay_exploration', False)
-        self.use_fusion = getattr(args, 'use_fusion', False)
-        self.fusion_max_iters = getattr(args, 'fusion_max_iters', 5)
+        self.use_fusion = getattr(args, 'use_fusion', True)
+        self.fusion_min_iters = getattr(args, 'fusion_min_iters', 10)
         self.fusion_prob = getattr(args, 'fusion_prob', 0.5)
 
         # Solution deduplication
@@ -1430,8 +1430,8 @@ You are a senior Python developer implementing a code improvement plan.
         used_fusion = False
 
         if not self.fake_run and self.use_fusion:
-            # Only use fusion after fusion_max_iters iterations
-            if self._iteration >= self.fusion_max_iters:
+            # Only use fusion after fusion_min_iters iterations
+            if self._iteration >= self.fusion_min_iters:
                 do_fusion = random.random() < self.fusion_prob
             else:
                 do_fusion = False
@@ -3253,8 +3253,8 @@ _ARGPARSE_DEFAULTS: dict[str, Any] = {
     "fake_run": False,
     "reset": False,
     "eval_cmd": None,
-    "use_fusion": False,
-    "fusion_max_iters": 5,
+    "use_fusion": True,
+    "fusion_min_iters": 10,
     "fusion_prob": 0.5,
 }
 
@@ -3278,7 +3278,7 @@ _CONFIG_TO_ARGPARSE: dict[str, str] = {
     "fake_run": "fake_run",
     "reset": "reset",
     "use_fusion": "use_fusion",
-    "fusion_max_iters": "fusion_max_iters",
+    "fusion_min_iters": "fusion_min_iters",
     "fusion_prob": "fusion_prob",
 }
 
@@ -3435,28 +3435,22 @@ def parse_args() -> argparse.Namespace:
         help="Disable progressive UCT exploration decay",
     )
     parser.add_argument(
-        "--use-fusion",
-        action="store_true",
-        default=False,
-        help="Enable cross-branch fusion agent — merges techniques from other branches into stagnant nodes (default: False)",
-    )
-    parser.add_argument(
         "--no-fusion",
         action="store_false",
         dest="use_fusion",
-        help="Disable cross-branch fusion agent",
+        help="Disable cross-branch fusion agent (default: enabled)",
     )
     parser.add_argument(
-        "--fusion-max-iters",
+        "--fusion-min-iters",
         type=int,
-        default=5,
-        help="Minimum iterations before fusion is allowed (default: 5)",
+        default=10,
+        help="Minimum iterations before fusion is allowed (default: 10)",
     )
     parser.add_argument(
         "--fusion-prob",
         type=float,
         default=0.5,
-        help="Probability of using fusion after fusion_max_iters (default: 0.5)",
+        help="Probability of using fusion after fusion_min_iters (default: 0.5)",
     )
     parser.add_argument(
         "--server",
