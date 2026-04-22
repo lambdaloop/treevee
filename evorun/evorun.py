@@ -26,7 +26,7 @@ Usage:
     python evorun.py ./codebase \\
         --max-iters 20 --patience 5 --reset
 
-LLM configuration (model, API key, base URL) is read from environment variables (OPENAI_API_KEY, OPENAI_API_BASE, etc.) and CLI args.
+LLM configuration (model, API key, base URL) is read from ~/.config/evorun/evorun.toml and the --model CLI flag.
 For fake-run (no eval, no LLM, just random scores and tree exploration):
     python evorun.py ./codebase \\
         --model none --fake-run --reset --max-iters 10
@@ -3245,10 +3245,8 @@ _ARGPARSE_DEFAULTS: dict[str, Any] = {
     "time_limit": None,
     "patience": 10,
     "eval_timeout": 300,
-    "temperature": 0.5,
     "llm_retries": 3,
     "llm_retry_base_delay": 3.0,
-    "max_tokens": 8192,
     "decay_exploration": True,
     "fake_run": False,
     "reset": False,
@@ -3259,13 +3257,9 @@ _ARGPARSE_DEFAULTS: dict[str, Any] = {
 }
 
 # Mapping from config.toml keys to argparse destination names.
-# Note: model, base_url, and api_key are NOT included here — they are
-# read from environment variables in __init__() so that env vars
-# are the primary source for OpenAI server settings.
 _CONFIG_TO_ARGPARSE: dict[str, str] = {
     "eval_cmd": "eval_cmd",
     "optim_mode": "optim_mode",
-    "temperature": "temperature",
     "max_iters": "max_iters",
     "time_limit": "time_limit",
     "patience": "patience",
@@ -3273,7 +3267,6 @@ _CONFIG_TO_ARGPARSE: dict[str, str] = {
     "max_children": "max_children",
     "llm_retries": "llm_retries",
     "llm_retry_base_delay": "llm_retry_base_delay",
-    "max_tokens": "max_tokens",
     "decay_exploration": "decay_exploration",
     "fake_run": "fake_run",
     "reset": "reset",
@@ -3400,20 +3393,12 @@ def parse_args() -> argparse.Namespace:
         help="Timeout per evaluation run in seconds (default: 300)",
     )
     parser.add_argument(
-        "--temperature", type=float, default=0.5,
-        help="LLM sampling temperature (default: 0.5)",
-    )
-    parser.add_argument(
         "--llm-retries", type=int, default=3,
         help="Retry LLM query on failure (default: 3)",
     )
     parser.add_argument(
         "--llm-retry-base-delay", type=float, default=3.0,
         help="Base delay (s) for exponential backoff (default: 3.0)",
-    )
-    parser.add_argument(
-        "--max-tokens", type=int, default=8192,
-        help="Max LLM output tokens (default: 8192)",
     )
     parser.add_argument(
         "--fake-run",
@@ -3476,14 +3461,6 @@ def parse_args() -> argparse.Namespace:
         _apply_task_config(args, task_config)
         _run_logger.info(f"Loaded config.toml from {args.codebase_dir}")
 
-    # Load defaults from config.yaml (lowest precedence, after config.toml).
-    # Note: model, base_url, and api_key are NOT loaded from config.yaml —
-    # they are read from environment variables in __init__() so that
-    # env vars are the primary source for OpenAI server settings.
-    defaults = _load_config_defaults()
-    if args.temperature == 0.5:
-        args.temperature = defaults.get("temperature", 0.5)
-
     # Validate arguments.
     if not Path(args.codebase_dir).exists():
         raise FileNotFoundError(f"codebase_dir not found: {args.codebase_dir}")
@@ -3512,32 +3489,6 @@ def parse_args() -> argparse.Namespace:
             _run_logger.info(f"Found state file: {state_path} — resuming.")
 
     return args
-
-
-def _load_config_defaults() -> dict[str, Any]:
-    """Load LLM defaults from config.yaml (if present). Only fills missing values.
-
-    Returns:
-        Dict of config values.
-    """
-    config_path = Path("config/config.yaml")
-    if not config_path.exists():
-        return {}
-    try:
-        import yaml
-        with open(config_path) as fh:
-            data: dict[str, Any] = yaml.safe_load(fh) or {}
-        stage = data.get("agent", {}).get("code", {})
-        return {
-            "model": stage.get("model", None),
-            "base_url": stage.get("base_url", None),
-            "api_key": stage.get("api_key", None),
-            "temperature": stage.get("temperature", None),
-        }
-    except Exception:
-        return {"model": None, "base_url": None, "api_key": None}
-
-
 
 
 # --------------------

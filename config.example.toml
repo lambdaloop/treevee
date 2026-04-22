@@ -2,13 +2,24 @@
 # Copy this file to config.toml and adjust as needed.
 # CLI args take precedence over config.toml values, which take precedence
 # over the defaults listed here.
+#
+# Note: LLM model selection is NOT configured here. Use:
+#   --model CLI flag, or
+#   ~/.config/evorun/evorun.toml (planner/editor sections)
 
 # ── LLM ──────────────────────────────────────────────────────────
-model = "claude-sonnet-4-6"
-temperature = 0.5
-max_tokens = 8192
 llm_retries = 3
 llm_retry_base_delay = 3.0
+
+# ── Search ───────────────────────────────────────────────────────
+eval_cmd = "pixi run python eval.py"
+optim_mode = "max"
+max_iters = 50
+time_limit = null
+patience = 10
+eval_timeout = 300
+max_children = 10
+decay_exploration = true
 
 # ── Search ───────────────────────────────────────────────────────
 eval_cmd = "pixi run python eval.py"
