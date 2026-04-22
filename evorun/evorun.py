@@ -490,28 +490,32 @@ def _build_claude_env(provider: str, model: str, api_key: str | None) -> dict[st
     Returns a dict where:
     - string values override the env var
     - _UNSET means explicitly delete the env var
+
+    api_key: if None or the literal string "unset", the ANTHROPIC_API_KEY
+             env var is unset; otherwise it is set to the given value
+             (even for the anthropic provider).
     """
     env: dict[str, object] = {}
     if provider == "anthropic":
         env["ANTHROPIC_BASE_URL"] = _UNSET
-        env["ANTHROPIC_API_KEY"] = _UNSET
         env["ANTHROPIC_MODEL"] = _UNSET
         env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = _UNSET
+        env["ANTHROPIC_API_KEY"] = _UNSET if api_key in (None, "unset") else api_key
     elif provider == "deepseek":
         env["ANTHROPIC_BASE_URL"] = "https://api.deepseek.com/anthropic"
-        env["ANTHROPIC_API_KEY"] = api_key
+        env["ANTHROPIC_API_KEY"] = api_key if api_key not in (None, "unset") else _UNSET
         env["ANTHROPIC_MODEL"] = model
         env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model
         env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
     elif provider == "openrouter":
         env["ANTHROPIC_BASE_URL"] = "https://openrouter.ai/api"
-        env["ANTHROPIC_API_KEY"] = ""
+        env["ANTHROPIC_API_KEY"] = _UNSET if api_key in (None, "unset") else api_key
         env["ANTHROPIC_MODEL"] = model
         env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model
     else:
         # URL mode
         env["ANTHROPIC_BASE_URL"] = provider
-        env["ANTHROPIC_API_KEY"] = api_key
+        env["ANTHROPIC_API_KEY"] = api_key if api_key not in (None, "unset") else _UNSET
         env["ANTHROPIC_MODEL"] = model
         env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model
     return env
