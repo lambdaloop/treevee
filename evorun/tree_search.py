@@ -114,11 +114,6 @@ class TreeSearch:
         """
         if raw_score is None or math.isnan(raw_score):
             return 0.0
-        # Prevent duplicate scores from corrupting the sorted list.
-        # A duplicate (e.g., from a rejected duplicate child) would cause
-        # list.remove() in the undo path to delete the wrong entry.
-        if raw_score in self._scores:
-            return 0.0
         self._reward_count += 1
         bisect.insort(self._scores, raw_score)
         if len(self._scores) <= 1:
@@ -136,7 +131,7 @@ class TreeSearch:
 
         Selection algorithm:
             1.  Collect all expandable nodes across the full tree (not just root children)
-            2.  Score each candidate with UCT = Q + c * sqrt(ln(parent_children + 1) / num_children)
+            2.  Score each candidate with UCT = Q + c * sqrt(ln(parent_visits + 1) / visits)
             3.  Add sparsity bonus for nodes in branches with fewer total expansions
             4.  Pick the highest-scoring node
 
@@ -164,7 +159,7 @@ class TreeSearch:
             # No node can expand more -- pick highest-Q node overall.
             return max(
                 self.journal.nodes,
-                key=lambda n: n.total_reward / max(n.num_children, 1),
+                key=lambda n: n.total_reward / max(n.visits, 1),
             )
 
         # Score each candidate.
@@ -182,7 +177,7 @@ class TreeSearch:
         logger.info(
             f"[Tree] Selected node {best_node.id[:8]} ({node_label}, "
             f"UCT={_best_score:.4f}, raw={raw}, "
-            f"Q={best_node.total_reward / max(best_node.num_children, 1):.4f}, "
+            f"Q={best_node.total_reward / max(best_node.visits, 1):.4f}, "
             f"children={best_node.num_children}, depth={self._node_depth(best_node)})"
         )
 
@@ -200,26 +195,25 @@ class TreeSearch:
         All nodes are scored the same way: mean reward + depth-weighted
         exploration bonus, with sparsity bonus for under-explored branches.
         """
-        mean_reward: float = node.total_reward / max(node.num_children, 1)
+        mean_reward: float = node.total_reward / max(node.visits, 1)
 
         # Standard UCT exploration, depth-weighted.
         depth_of_node: int = self._node_depth(node)
         # Shallow nodes get more exploration: root-child=1.8, depth2=1.3, depth3+=0.8
         depth_weight = max(2.3 - 0.3 * depth_of_node, 0.5)
-        parent_children: int = node.parent.num_children if node.parent else 1
+        parent_visits: int = node.parent.visits if node.parent else 1
         exploration: float = self.explore_c * math.sqrt(
-            math.log(max(parent_children, 1) + 1) / max(node.num_children, 1)
+            math.log(max(parent_visits, 1) + 1) / max(node.visits, 1)
         ) * depth_weight
 
-        # For expanded nodes (num_children > 0), cap exploration to avoid
-        # over-exploration once a node has been tried at least once.
-        if node.num_children > 0:
+        # Cap exploration for visited nodes (visits > 1 means expanded at least once).
+        if node.visits > 1:
             exploration = min(exploration, self.explore_c * 0.8)
 
-        # Broken node bonus — decays with num_children so the node gets tried
+        # Broken node bonus — decays with visits so the node gets tried
         # early but doesn't dominate long-term selection.
         if not node.metric or (node.metric is not None and node.metric.value is None):
-            exploration += self.explore_c * 2.0 / max(node.num_children, 1)
+            exploration += self.explore_c * 2.0 / max(node.visits, 1)
 
         uct: float = mean_reward + exploration
 

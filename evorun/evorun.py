@@ -1044,12 +1044,13 @@ class EvoRunAgent:
         planner_env = _build_claude_env(self.planner_provider, self.planner_model, self.planner_api_key)
         planner_prompt = f"""\
 You are a code planning architect. Your job is to analyze evaluation results
-and code review feedback, then produce a plan for what changes to make.
+and produce a plan for what changes to make.
 
 IMPORTANT RULES:
-1. Do NOT write any code. Do NOT use Read, Edit, or Write tools.
+1. Do NOT write any code. Do NOT use Edit or Write tools.
 2. Do NOT produce diffs or file content.
 3. Describe changes in plain language — the editor will implement them.
+4. Use the Read tool to inspect the specific files relevant to your plan.
 
 ## Required Analysis Framework
 
@@ -1085,7 +1086,7 @@ Produce a concise plan following this structure.
                 model=self.planner_model,
                 env_overrides=planner_env,
                 max_turns=30,
-                allowed_tools=[],
+                allowed_tools=['Read'],
                 log_file=str(self.codebase.codebase_dir / ".evorun_planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
@@ -1117,7 +1118,7 @@ Produce a concise plan following this structure.
 You are a senior Python developer implementing a code improvement plan.
 
 ## Current Codebase
-{self.codebase.get_codebase_prompt(max_size=4000)}
+{self.codebase.get_codebase_prompt(max_size=20000)}
 
 ## Context (from evaluation)
 {feedback}
@@ -1132,8 +1133,7 @@ You are a senior Python developer implementing a code improvement plan.
 4. Preserve working code that is not mentioned in the plan.
 5. Use Edit tool for targeted changes where possible.
 6. Do NOT make changes beyond what the plan specifies.
-7. Do not suggest EDA.
-8. Focus on improving the evaluation score.
+7. Focus on improving the evaluation score.
 """
 
         try:
@@ -1200,15 +1200,16 @@ You are a code planning architect. Your job is to analyze evaluation errors
 and produce a plan for what changes to make to fix them.
 
 IMPORTANT RULES:
-1. Do NOT write any code. Do NOT use Read, Edit, or Write tools.
+1. Do NOT write any code. Do NOT use Edit or Write tools.
 2. Do NOT produce diffs or file content.
 3. Describe changes in plain language — the editor will implement them.
+4. Use the Read tool to read the files implicated by the error before planning.
 
 ## Error
 {error_text}
 
 ## Instructions
-1. Analyze the error output above.
+1. Read the files most likely involved in the error.
 2. Identify the root cause of the failure.
 3. List the specific files and code sections that need to be changed.
 4. Describe what each change should accomplish.
@@ -1222,7 +1223,7 @@ Produce a concise fix plan following this structure.
                 model=self.planner_model,
                 env_overrides=planner_env,
                 max_turns=30,
-                allowed_tools=[],
+                allowed_tools=['Read'],
                 log_file=str(self.codebase.codebase_dir / ".evorun_planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
@@ -1278,7 +1279,7 @@ Produce a concise fix plan following this structure.
 You are a senior Python developer fixing errors in the codebase.
 
 ## Current Codebase
-{self.codebase.get_codebase_prompt(max_size=4000)}
+{self.codebase.get_codebase_prompt(max_size=20000)}
 
 ## Error
 {error_text}
@@ -1404,10 +1405,10 @@ Do not try to improve the score — just fix the errors.
         # ---- Step 0: Select node to expand (UCT across entire tree) ----
         target_branch_id = len(self.tree.root.children) + 1
         target_node = self.tree.select_node(branch_id=target_branch_id)
-        # avg_reward = current UCT score (num_children==0 → inf).
+        # avg_reward = current UCT score (visits==0 → inf).
         avg_reward = (
-            target_node.total_reward / max(target_node.num_children, 1)
-            if target_node.num_children else float("inf")
+            target_node.total_reward / max(target_node.visits, 1)
+            if target_node.visits else float("inf")
         )
         _run_logger.info(
             f"[Iter {self._iteration + 1}/{self.max_iters}] "
@@ -1489,10 +1490,11 @@ Do not try to improve the score — just fix the errors.
                     self.consecutive_timeouts += 1
                     if self.consecutive_timeouts >= self.eval_timeout_chain_limit:
                         _run_logger.warning(
-                            f"Eval timed out {self.consecutive_timeouts} "
-                            f"times in a row — treating timeouts as eval errors "
-                            "and continuing (Claude will still be called)."
+                            f"[Stop] Eval timed out {self.consecutive_timeouts} "
+                            f"consecutive times — stopping run."
                         )
+                        self._stop = True
+                        return
                 else:
                     self.consecutive_timeouts = 0
 
@@ -1554,12 +1556,8 @@ Do not try to improve the score — just fix the errors.
         if not self.fake_run and (result.timed_out or result.had_error or (result.exit_code is not None and result.exit_code != 0)):
             debug_instructions = self._run_debug_agent(result, target_node)
 
-        # ---- Step 4: Run code review (if enabled) ----
+        # ---- Step 4: Code review disabled (false-positive rate too high) ----
         code_review_notes = ""
-        if not self.fake_run and target_node.code:
-            needs_fix, notes = self._run_code_review(target_node.code)
-            if needs_fix and notes:
-                code_review_notes = f"## Code Review\n{notes}\n"
 
         # Compute parent_id early — used by stagnation tracking.
         # Stagnation is keyed by the node being expanded (target_node.id),
@@ -1929,14 +1927,16 @@ Do not try to improve the score — just fix the errors.
                 f"iter_snapshot_{child_node.id[:8]}"
             )
 
-        # Track this code as seen.
+        # Track this code as seen and populate child_node.code for fusion diffs.
         if child_code:
             self._seen_code_hashes.add(self._compute_code_hash(child_code))
+            child_node.code = child_code
         else:
             # Fallback: read from the finalized snapshot.
             final_code = self._read_snapshot_code(child_node)
             if final_code:
                 self._seen_code_hashes.add(self._compute_code_hash(final_code))
+                child_node.code = final_code
 
         # Record HistoryEntry for this child expansion.
         self.history.append(HistoryEntry(
@@ -1984,6 +1984,9 @@ Do not try to improve the score — just fix the errors.
                 self._parent_stagnation[stagnation_parent_id] = (
                     self._parent_stagnation.get(stagnation_parent_id, 0) + 1
                 )
+        elif child_score is not None and parent_score is None:
+            # Parent was broken; child produced a valid score — treat as improvement.
+            self._parent_stagnation[stagnation_parent_id] = 0
         elif child_score is None:
             # Claude produced no change or eval returned no score — stagnation.
             self._parent_stagnation[stagnation_parent_id] = (
@@ -2560,29 +2563,55 @@ Do not try to improve the score — just fix the errors.
     # ─── Fusion agent ───────────────────────────────────────────────
 
     def _find_fusion_candidates(self, target_node, max_candidates=2):
-        """Find the best UCT-scored nodes in the tree as fusion candidates.
+        """Find diverse, high-scoring nodes from other branches as fusion candidates.
 
-        Reuses the tree's `_score_candidate` method (UCT + exploration bonuses)
-        to pick the top N nodes, excluding the target node. This ensures fusion
-        candidates benefit from the same scoring logic used during selection —
-        broken nodes, unvisited nodes, and well-explored nodes are all scored
-        consistently.
+        Picks the best-scoring node from each branch other than the target's,
+        ensuring cross-branch diversity. Falls back to any scored node if not
+        enough distinct branches exist.
 
         Args:
             target_node: The SearchNode being expanded.
             max_candidates: Maximum number of candidates to return.
 
         Returns:
-            List of SearchNode objects (the reference solutions to fuse from),
-            sorted by UCT score descending.
+            List of SearchNode objects sorted by score descending.
         """
-        candidates = [
+        eligible = [
             node for node in self.tree.journal.nodes
             if node.id != target_node.id
             and node is not self.tree.root
+            and node.metric is not None
+            and node.metric.value is not None
         ]
-        candidates.sort(key=self.tree._score_candidate, reverse=True)
-        return candidates[:max_candidates]
+        if not eligible:
+            return []
+
+        target_branch = target_node.branch_id
+        if self.tree.maximize:
+            score_key = lambda n: n.metric.value  # noqa: E731
+        else:
+            score_key = lambda n: -n.metric.value  # noqa: E731
+        sorted_all = sorted(eligible, key=score_key, reverse=True)
+
+        # One best node per branch, preferring branches different from the target's.
+        branches_seen: set = set()
+        diverse: list = []
+        for node in sorted_all:
+            branch = node.branch_id
+            if branch != target_branch and branch not in branches_seen:
+                branches_seen.add(branch)
+                diverse.append(node)
+                if len(diverse) >= max_candidates:
+                    break
+
+        # Fill remaining slots from any branch if needed.
+        for node in sorted_all:
+            if node not in diverse:
+                diverse.append(node)
+                if len(diverse) >= max_candidates:
+                    break
+
+        return diverse
 
     def _run_fusion(self, target_node) -> tuple[str, str, list[str], list[str], list[str], bool]:
         """Run cross-branch fusion: merge techniques from other branches into the current node.
@@ -2603,13 +2632,17 @@ Do not try to improve the score — just fix the errors.
             _run_logger.info(f"[Fusion] No candidates found for node {target_node.id[:8]}")
             return None, "", [], [], [], False, "", ""
 
+        # Load code from snapshots (node.code is "" for nodes created before this fix).
+        target_code = target_node.code or self._read_snapshot_code(target_node)
+
         # Build reference trajectories (as diffs vs target)
         reference_sections = []
         for i, ref_node in enumerate(candidates):
             ref_score = ref_node.metric.value if ref_node.metric else "N/A"
-            ref_q = ref_node.total_reward / max(ref_node.num_children, 1)
+            ref_q = ref_node.total_reward / max(ref_node.visits, 1)
+            ref_code = ref_node.code or self._read_snapshot_code(ref_node)
             diff_str = self._compute_code_diff(
-                target_node.code, ref_node.code,
+                target_code, ref_code,
                 fromfile="target", tofile=f"ref_{i + 1}",
             )
             reference_sections.append(
@@ -2618,7 +2651,7 @@ Do not try to improve the score — just fix the errors.
             )
 
         # Build codebase context
-        codebase_prompt = self.codebase.get_codebase_prompt(max_size=4000)
+        codebase_prompt = self.codebase.get_codebase_prompt(max_size=20000)
 
         # Build target node context (score + eval output)
         target_score = target_node.metric.value if target_node.metric else None
@@ -2645,8 +2678,9 @@ reference diffs below and plan how to selectively incorporate useful
 techniques into the current codebase.
 
 IMPORTANT RULES:
-1. Do NOT write any code. Do NOT use Read, Edit, or Write tools.
+1. Do NOT write any code. Do NOT use Edit or Write tools.
 2. Describe changes in plain language — the editor will implement them.
+3. Use the Read tool to inspect current files if you need more context.
 
 ## Required Analysis
 
@@ -2695,7 +2729,7 @@ Produce a concise fusion plan following this structure.
                 model=self.planner_model,
                 env_overrides=fusion_planner_env,
                 max_turns=30,
-                allowed_tools=[],
+                allowed_tools=['Read'],
                 log_file=str(self.codebase.codebase_dir / ".evorun_planner_output"),
                 retries=2,
                 retry_base_delay=3.0,
@@ -2730,7 +2764,6 @@ You are implementing a cross-branch fusion plan.
 3. Preserve what is working in your current solution.
 4. Do NOT blindly combine everything — choose the most relevant technique(s).
 5. Use Edit tool for targeted changes where possible.
-6. Do not suggest EDA.
 
 Focus on quality over quantity: one well-integrated technique is better than
 a messy combination of several.
@@ -3279,9 +3312,10 @@ a messy combination of several.
         if parent_score is not None:
             delta = result.score - parent_score
             improved = (delta > 0) if self.tree.maximize else (delta < 0)
-            direction = "improved" if improved else "decreased"
+            direction = "improved" if improved else "regressed"
             directive.append(
-                f"Previous score: {parent_score:.4f} -> Current: {result.score:.4f} ({delta:+.4f})"
+                f"Previous score: {parent_score:.4f} → Current: {result.score:.4f} "
+                f"({delta:+.4f}, {direction})"
             )
 
         directive.append("")
