@@ -15,17 +15,7 @@ llm_retry_base_delay = 3.0
 eval_cmd = "pixi run python eval.py"
 optim_mode = "max"
 max_iters = 50
-time_limit = null
-patience = 10
-eval_timeout = 300
-max_children = 10
-decay_exploration = true
-
-# ── Search ───────────────────────────────────────────────────────
-eval_cmd = "pixi run python eval.py"
-optim_mode = "max"
-max_iters = 50
-time_limit = null
+time_limit = 0 # set in seconds, 0 means no limit
 patience = 10
 eval_timeout = 300
 max_children = 10

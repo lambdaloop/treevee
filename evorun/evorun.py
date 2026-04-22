@@ -675,7 +675,7 @@ class EvoRunAgent:
 
         # Optimization parameters
         self.max_iters: int = args.max_iters
-        self.time_limit: float | None = args.time_limit
+        self.time_limit: float = args.time_limit
         self.patience: int = args.patience
         self.eval_timeout: int = args.eval_timeout
         self.eval_timeout_chain_limit: int = 3
@@ -850,7 +850,7 @@ class EvoRunAgent:
             return 0.15  # Default static value
 
         elapsed = time.time() - self._start_time
-        total_time = self.time_limit if self.time_limit is not None else 1e9
+        total_time = self.time_limit if self.time_limit > 0 else 1e9
         progress = min(elapsed / total_time, 1.0)
 
         # Piecewise decay: start high, decay to lower bound
@@ -1079,7 +1079,7 @@ You are a senior Python developer implementing a code improvement plan.
 
         while self._iteration < self.max_iters and not self._stop:
             wall_elapsed = time.time() - self._start_time
-            if self.time_limit is not None and wall_elapsed > self.time_limit:
+            if self.time_limit > 0 and wall_elapsed > self.time_limit:
                 _run_logger.info(f"[Stop] Elapsed time ({wall_elapsed:.0f}s) exceeded "
                             f"time limit ({self.time_limit}s).")
                 break
@@ -3073,7 +3073,7 @@ _ARGPARSE_DEFAULTS: dict[str, Any] = {
     "max_children": 10,
     "optim_mode": "max",
     "max_iters": 50,
-    "time_limit": None,
+    "time_limit": 0,
     "patience": 10,
     "eval_timeout": 300,
     "llm_retries": 3,
@@ -3211,8 +3211,8 @@ def parse_args() -> argparse.Namespace:
         help="Maximum number of iterations (default: 50)",
     )
     parser.add_argument(
-        "--time-limit", type=int, default=None,
-        help="Wall-clock time limit in seconds (no limit if not specified)",
+        "--time-limit", type=int, default=0,
+        help="Wall-clock time limit in seconds (0 means no limit)",
     )
     parser.add_argument(
         "--patience", type=int, default=10,
