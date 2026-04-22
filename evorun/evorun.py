@@ -3736,6 +3736,10 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Restore the root node snapshot instead of the best checkpoint",
     )
+    restore_parser.add_argument(
+        "--node",
+        help="Restore a specific node by its ID",
+    )
 
     args = parser.parse_args()
     return args
@@ -4047,7 +4051,10 @@ def _cmd_restore(args: argparse.Namespace) -> None:
         _run_logger.error(f"Failed to read state file: {e}")
         sys.exit(1)
 
-    if args.root:
+    if args.node:
+        # Restore a specific node by ID.
+        snapshot_name = f"iter_snapshot_{args.node[:8]}"
+    elif args.root:
         # Restore the root node snapshot.
         tree = state.get("tree_structure", {})
         root_id = tree.get("root_id")
