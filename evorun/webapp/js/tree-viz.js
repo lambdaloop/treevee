@@ -414,6 +414,61 @@ function showNodeDetailToBottom(nodeData) {
     }
     html += '</div>';
 
+  }
+
+  // Diff (always shown)
+  html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;">';
+  html += '<h4 style="color:var(--accent-lavender);margin-bottom:6px;font-size:13px;">Code Diff (vs parent)</h4>';
+  if (historyEntry?.diff_text && historyEntry.diff_text.trim()) {
+    html += renderDiffHTML(historyEntry.diff_text);
+  } else {
+    html += '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">No diff available (no history entry for this step).</p>';
+  }
+  html += '</div>';
+
+  // Eval output / Error output
+  const hasEvalOutput = nodeData.eval_output && nodeData.eval_output.trim();
+  const hasHistoryEntry = !!historyEntry;
+  const isError = nodeData.score === null && scoreReason && !scoreReason.startsWith('Baseline') && !scoreReason.startsWith('Score not parsed');
+  if (hasEvalOutput || hasHistoryEntry) {
+    const sectionBorder = isError ? 'rgba(255,183,178,0.4)' : 'var(--border-color)';
+    const sectionBg = isError ? 'rgba(255,183,178,0.05)' : 'var(--bg-primary)';
+    const headerColor = isError ? 'var(--accent-peach)' : 'var(--accent-pink)';
+    const preBorder = isError ? 'rgba(255,183,178,0.3)' : 'var(--border-color)';
+    const preBg = isError ? 'rgba(255,183,178,0.08)' : 'var(--bg-primary)';
+    const preColor = isError ? 'var(--accent-peach)' : 'var(--text-secondary)';
+    const btnBg = isError ? 'var(--accent-peach-dim)' : 'var(--bg-tertiary)';
+    const btnColor = isError ? 'var(--accent-peach)' : 'var(--accent-pink)';
+    const title = isError ? 'Error Output' : 'Evaluation Output';
+
+    html += `<div style="background:${sectionBg};border:1px solid ${sectionBorder};border-radius:6px;padding:10px;margin-bottom:12px;">`;
+    html += `<h4 style="color:${headerColor};margin-bottom:6px;font-size:13px;">${title}</h4>`;
+
+    // Show timeout/exec_time from history entry
+    if (hasHistoryEntry) {
+      if (historyEntry.timed_out) {
+        html += `<div class="detail-row"><span class="detail-label" style="color:var(--accent-peach);">Status</span><span class="detail-value" style="color:var(--accent-peach);">Timed out</span></div>`;
+      } else {
+        html += `<div class="detail-row"><span class="detail-label">Status</span><span class="detail-value">OK</span></div>`;
+      }
+      html += detailRow('Exec Time', `${historyEntry.exec_time.toFixed(2)}s`);
+    }
+
+    if (hasEvalOutput) {
+      const evalPreview = nodeData.eval_output;
+      const isLong = evalPreview.length > 400;
+      const display = isLong ? evalPreview.slice(0, 400) + '\n... (truncated)' : evalPreview;
+      html += `<pre style="background:${preBg};padding:10px;border-radius:6px;font-size:11px;overflow:auto;max-height:200px;border:1px solid ${preBorder};color:${preColor};white-space:pre-wrap;word-break:break-word;">${escapeHtml(display)}</pre>`;
+      if (isLong) {
+        html += `<button class="expand-btn" style="background:${btnBg};color:${btnColor};border:1px solid ${sectionBorder};padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;margin-top:6px;">Show full output (${evalPreview.length} chars)</button>`;
+      }
+    } else if (hasHistoryEntry) {
+      html += `<p style="color:var(--text-muted); padding:4px 0; font-size:11px;">No eval output captured.</p>`;
+    }
+    html += '</div>';
+  }
+
+  if (historyEntry) {
     // Planner input
     if (historyEntry?.planner_input && historyEntry.planner_input.trim()) {
       const pInput = historyEntry.planner_input;
@@ -471,72 +526,6 @@ function showNodeDetailToBottom(nodeData) {
     }
   }
 
-  // Eval output / Error output
-  const hasEvalOutput = nodeData.eval_output && nodeData.eval_output.trim();
-  const hasHistoryEntry = !!historyEntry;
-  const isError = nodeData.score === null && scoreReason && !scoreReason.startsWith('Baseline') && !scoreReason.startsWith('Score not parsed');
-  if (hasEvalOutput || hasHistoryEntry) {
-    const sectionBorder = isError ? 'rgba(255,183,178,0.4)' : 'var(--border-color)';
-    const sectionBg = isError ? 'rgba(255,183,178,0.05)' : 'var(--bg-primary)';
-    const headerColor = isError ? 'var(--accent-peach)' : 'var(--accent-pink)';
-    const preBorder = isError ? 'rgba(255,183,178,0.3)' : 'var(--border-color)';
-    const preBg = isError ? 'rgba(255,183,178,0.08)' : 'var(--bg-primary)';
-    const preColor = isError ? 'var(--accent-peach)' : 'var(--text-secondary)';
-    const btnBg = isError ? 'var(--accent-peach-dim)' : 'var(--bg-tertiary)';
-    const btnColor = isError ? 'var(--accent-peach)' : 'var(--accent-pink)';
-    const title = isError ? 'Error Output' : 'Evaluation Output';
-
-    html += `<div style="background:${sectionBg};border:1px solid ${sectionBorder};border-radius:6px;padding:10px;margin-bottom:12px;">`;
-    html += `<h4 style="color:${headerColor};margin-bottom:6px;font-size:13px;">${title}</h4>`;
-
-    // Show timeout/exec_time from history entry
-    if (hasHistoryEntry) {
-      if (historyEntry.timed_out) {
-        html += `<div class="detail-row"><span class="detail-label" style="color:var(--accent-peach);">Status</span><span class="detail-value" style="color:var(--accent-peach);">Timed out</span></div>`;
-      } else {
-        html += `<div class="detail-row"><span class="detail-label">Status</span><span class="detail-value">OK</span></div>`;
-      }
-      html += detailRow('Exec Time', `${historyEntry.exec_time.toFixed(2)}s`);
-    }
-
-    if (hasEvalOutput) {
-      const evalPreview = nodeData.eval_output;
-      const isLong = evalPreview.length > 400;
-      const display = isLong ? evalPreview.slice(0, 400) + '\n... (truncated)' : evalPreview;
-      html += `<pre style="background:${preBg};padding:10px;border-radius:6px;font-size:11px;overflow:auto;max-height:200px;border:1px solid ${preBorder};color:${preColor};white-space:pre-wrap;word-break:break-word;">${escapeHtml(display)}</pre>`;
-      if (isLong) {
-        html += `<button class="expand-btn" style="background:${btnBg};color:${btnColor};border:1px solid ${sectionBorder};padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;margin-top:6px;">Show full output (${evalPreview.length} chars)</button>`;
-      }
-    } else if (hasHistoryEntry) {
-      html += `<p style="color:var(--text-muted); padding:4px 0; font-size:11px;">No eval output captured.</p>`;
-    }
-    html += '</div>';
-  }
-
-  // Diff (always shown)
-  html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;">';
-  html += '<h4 style="color:var(--accent-lavender);margin-bottom:6px;font-size:13px;">Code Diff (vs parent)</h4>';
-  if (historyEntry?.diff_text && historyEntry.diff_text.trim()) {
-    html += renderDiffHTML(historyEntry.diff_text);
-  } else {
-    html += '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">No diff available (no history entry for this step).</p>';
-  }
-  html += '</div>';
-
-  // Claude feedback (prompt sent to Claude)
-  if (historyEntry?.claude_feedback && historyEntry.claude_feedback.trim()) {
-    const fbPreview = historyEntry.claude_feedback;
-    const isLongFb = fbPreview.length > 800;
-    const displayFb = isLongFb ? fbPreview.slice(0, 800) + '\n... (truncated, click to expand)' : fbPreview;
-    html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;">';
-    html += '<h4 style="color:var(--accent-sky);margin-bottom:6px;font-size:13px;">Claude Feedback</h4>';
-    html += `<pre id="claude-feedback-display" style="background:var(--bg-tertiary);padding:10px;border-radius:6px;font-size:11px;overflow:auto;max-height:300px;border:1px solid var(--border-color);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;">${escapeHtml(displayFb)}</pre>`;
-    if (isLongFb) {
-      html += `<button id="claude-feedback-expand" style="background:var(--bg-tertiary);color:var(--accent-sky);border:1px solid var(--border-color);padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;margin-top:6px;">Show full feedback (${fbPreview.length} chars)</button>`;
-    }
-    html += '</div>';
-  }
-
   diffOutput.innerHTML = html;
   diffSection.style.display = 'block';
   closeBtn.style.display = 'inline-block';
@@ -549,16 +538,6 @@ function showNodeDetailToBottom(nodeData) {
       const pre = diffOutput.querySelector('pre');
       if (pre) pre.textContent = nodeData.eval_output;
       expandBtn.style.display = 'none';
-    });
-  }
-
-  // Handle claude feedback expand button
-  const claudeFbExpandBtn = diffOutput.querySelector('#claude-feedback-expand');
-  if (claudeFbExpandBtn && historyEntry?.claude_feedback) {
-    claudeFbExpandBtn.addEventListener('click', () => {
-      const fbPre = diffOutput.querySelector('#claude-feedback-display');
-      if (fbPre) fbPre.textContent = historyEntry.claude_feedback;
-      claudeFbExpandBtn.style.display = 'none';
     });
   }
 
