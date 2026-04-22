@@ -1881,9 +1881,7 @@ Do not try to improve the score — just fix the errors.
             edit_summary=edit_summary,
             diff_text=diff_text,
         ))
-        if planner_output:
-            log_content = planner_output + "\n\n---\n\n" + log_content
-        self.history[-1].claude_log = log_content or ""
+        self.history[-1].claude_log = planner_output or ""
         self.history[-1].claude_feedback = feedback or ""
 
         # Update global best if child score improves (respects optim-mode).
