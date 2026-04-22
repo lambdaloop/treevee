@@ -3562,8 +3562,8 @@ def _add_run_args(subparser: argparse.ArgumentParser) -> None:
     """Add arguments shared by the 'run' subcommand."""
     subparser.add_argument(
         "--path",
-        required=True,
-        help="Path to the codebase directory to optimize",
+        default=".",
+        help="Path to the codebase directory to optimize (default: current directory)",
     )
     subparser.add_argument(
         "--eval-cmd",
@@ -3669,8 +3669,8 @@ def _add_viz_args(subparser: argparse.ArgumentParser) -> None:
     """Add arguments shared by the 'viz' subcommand."""
     subparser.add_argument(
         "--path",
-        required=True,
-        help="Path to the codebase directory to visualize",
+        default=".",
+        help="Path to the codebase directory to visualize (default: current directory)",
     )
     subparser.add_argument(
         "--port",
@@ -3720,6 +3720,22 @@ def parse_args() -> argparse.Namespace:
         help="Initialize a new evorun project in the specified directory",
     )
     _add_init_args(init_parser)
+
+    # --- restore subcommand ---
+    restore_parser = subparsers.add_parser(
+        "restore",
+        help="Restore the codebase from a saved snapshot",
+    )
+    restore_parser.add_argument(
+        "--path",
+        default=".",
+        help="Path to the codebase directory with the state file (default: current directory)",
+    )
+    restore_parser.add_argument(
+        "--root",
+        action="store_true",
+        help="Restore the root node snapshot instead of the best checkpoint",
+    )
 
     args = parser.parse_args()
     return args
@@ -3957,10 +3973,102 @@ def _cmd_init(args: argparse.Namespace) -> None:
     _run_logger.info(f"Project initialized at {init_dir}")
 
 
+def _restore_snapshot(codebase_dir: Path, snapshot_name: str) -> None:
+    """Restore the codebase from a named snapshot.
+
+    Args:
+        codebase_dir: Path to the codebase root.
+        snapshot_name: Snapshot directory name (e.g. "iter_snapshot_<id>") or
+            absolute path to a snapshot directory.
+    """
+    snapshot_dir = Path(snapshot_name)
+
+    # Resolve relative names against the codebase snapshots directory.
+    if not snapshot_dir.exists():
+        snapshot_dir = codebase_dir / ".evorun_snapshots" / snapshot_name
+
+    if not snapshot_dir.exists():
+        _run_logger.info(f"[Restore] Snapshot not found: {snapshot_name}")
+        return
+
+    # Security: reject any resolved path that escapes the snapshot dir.
+    try:
+        resolved = snapshot_dir.resolve()
+        allowed_base = (codebase_dir / ".evorun_snapshots").resolve()
+        if not str(resolved).startswith(str(allowed_base)):
+            _run_logger.error(f"[Restore] Snapshot path escapes codebase: {snapshot_name}")
+            return
+    except OSError:
+        pass
+
+    # Copy files from snapshot to codebase.
+    snapshot_files: set[str] = set()
+    for p in snapshot_dir.rglob("*"):
+        if p.is_file():
+            rel = p.relative_to(snapshot_dir)
+            snapshot_files.add(str(rel))
+            target = codebase_dir / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(p, target)
+            _run_logger.info(f"  Restored: {rel}")
+
+    # Remove stale files from experiment/ that aren't in the snapshot.
+    experiment_dir = codebase_dir / "experiment"
+    if experiment_dir.is_dir():
+        for p in experiment_dir.rglob("*"):
+            if not p.is_file():
+                continue
+            rel = str(p.relative_to(codebase_dir))
+            if "__pycache__" in rel:
+                continue
+            if rel not in snapshot_files:
+                try:
+                    p.unlink()
+                    _run_logger.info(f"  Removed stale: {rel}")
+                except OSError:
+                    pass
+
+    _run_logger.info(f"[Restore] Completed from snapshot: {snapshot_name}")
+
+
+def _cmd_restore(args: argparse.Namespace) -> None:
+    """Restore the codebase from a saved snapshot."""
+    codebase_dir = Path(args.path)
+    state_path = codebase_dir / ".evorun_state.json"
+
+    if not state_path.exists():
+        _run_logger.error(f"No state file found at: {state_path}")
+        sys.exit(1)
+
+    try:
+        with open(state_path, "r", encoding="utf-8") as fh:
+            state = json.load(fh)
+    except Exception as e:
+        _run_logger.error(f"Failed to read state file: {e}")
+        sys.exit(1)
+
+    if args.root:
+        # Restore the root node snapshot.
+        tree = state.get("tree_structure", {})
+        root_id = tree.get("root_id")
+        if not root_id:
+            _run_logger.error("No root_id found in state file")
+            sys.exit(1)
+        snapshot_name = f"iter_snapshot_{root_id[:8]}"
+    else:
+        # Restore the best checkpoint.
+        snapshot_name = state.get("best_snapshot_iteration")
+        if not snapshot_name:
+            _run_logger.error("No best snapshot found in state file")
+            sys.exit(1)
+
+    _restore_snapshot(codebase_dir, snapshot_name)
+
+
 def main() -> None:
     """Entry point for evorun.
 
-    Dispatches to subcommand handlers: run, viz, init.
+    Dispatches to subcommand handlers: run, viz, init, restore.
     """
     _setup_logging()
     args = parse_args()
@@ -3971,6 +4079,8 @@ def main() -> None:
         _cmd_viz(args)
     elif args.command == "init":
         _cmd_init(args)
+    elif args.command == "restore":
+        _cmd_restore(args)
     else:
         # Should not reach here since required=True on subparsers.
         parser = argparse.ArgumentParser(
