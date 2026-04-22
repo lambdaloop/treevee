@@ -26,10 +26,10 @@ Usage:
     python evorun.py ./codebase \\
         --max-iters 20 --patience 5 --reset
 
-LLM configuration (model, API key, base URL) is read from ~/.config/evorun/evorun.toml and the --model CLI flag.
+LLM configuration (model, API key, base URL) is read from ~/.config/evorun/evorun.toml.
 For fake-run (no eval, no LLM, just random scores and tree exploration):
     python evorun.py ./codebase \\
-        --model none --fake-run --reset --max-iters 10
+        --fake-run --reset --max-iters 10
 """
 
 import argparse
@@ -82,6 +82,12 @@ MAX_PREV_EVAL_CHARS = 3000
 
 # Fake-run score variation range.
 FAKE_SCORE_DELTA_RANGE = 0.3
+
+# Rate limit / quota exhaustion messages from Claude CLI.
+_RATE_LIMIT_RE = re.compile(
+    r"(hit your limit|rate limit|too many requests|maximum number of messages|quota exceeded|429)",
+    re.IGNORECASE,
+)
 
 # ────────────────────────────────────────────────────────────
 # Data classes
@@ -542,9 +548,30 @@ def _run_claude_cli_with_env(
     log_file: str | None = None,
     retries: int = 3,
     retry_base_delay: float = 5.0,
+    stage: str = "",
+    print_output: bool = True,
 ) -> str:
-    """Run claude CLI with env var overrides (for provider switching)."""
+    """Run claude CLI with env var overrides (for provider switching).
+
+    Args:
+        stage: Optional stage name (e.g. "planner", "editor") for logger naming.
+        print_output: Whether to print claude output in real-time.
+    """
     import time
+
+    logger = _run_logger
+    if stage:
+        logger = logging.getLogger(f"evorun.{stage}")
+        if not logger.handlers:
+            logger.setLevel(logging.INFO)
+            fmt = logging.Formatter(
+                "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+            handler = logging.StreamHandler(sys.stdout)
+            handler.setFormatter(fmt)
+            logger.addHandler(handler)
+            logger.propagate = False
 
     merged_env = _merge_env(env_overrides)
 
@@ -573,7 +600,8 @@ def _run_claude_cli_with_env(
         output_lines = []
         try:
             for line in process.stdout:
-                print(line, end='', flush=True)
+                if print_output:
+                    print(line, end='', flush=True)
                 output_lines.append(line)
                 if log_fh:
                     log_fh.write(line)
@@ -590,7 +618,7 @@ def _run_claude_cli_with_env(
         try:
             return _do_call()
         except Exception as e:
-            _run_logger.warning(
+            logger.warning(
                 f"Claude CLI failed (attempt {attempt}/{retries}): {e}"
             )
             if attempt < retries:
@@ -649,15 +677,12 @@ class EvoRunAgent:
 
         self.fake_run = getattr(args, 'fake_run', False)
 
-        # LLM config from CLI args, config file, and environment variables.
-        self.model_name = getattr(args, 'model', None) or "claude-sonnet-4-6"
-
-        # Load planner/editor config from ~/.config/evorun/evorun.toml
-        config = _load_config_file()
-        planner_cfg = config.get("planner", {})
-        editor_cfg = config.get("editor", {})
-
-        self.planner_model = planner_cfg.get("model") or self.model_name
+        # LLM config from ~/.config/evorun/evorun.toml.
+        # Falls back to hardcoded defaults if the config file is missing a value.
+        _config = _load_config_file()
+        planner_cfg = _config.get("planner", {})
+        editor_cfg = _config.get("editor", {})
+        self.planner_model = planner_cfg.get("model") or "claude-sonnet-4-6"
         self.editor_model = editor_cfg.get("model") or self.planner_model
 
         self.planner_provider = planner_cfg.get("provider") or "anthropic"
@@ -973,10 +998,31 @@ IMPORTANT RULES:
 2. Do NOT produce diffs or file content.
 3. Describe changes in plain language — the editor will implement them.
 
+## Required Analysis Framework
+
+Structure your plan using the following sections:
+
+**Root Cause Analysis** (2-3 sentences):
+- What specific aspect of the current code is causing poor performance?
+- What evidence from the eval output supports this diagnosis?
+
+**Change Classification** — pick ONE:
+- **Tier 1: Optimization** — Keep model/architecture fixed. Only tune hyperparameters, learning rate schedules, random seeds, post-processing. Use when we are close to the target.
+- **Tier 2: Representation** — Change specific modules (swap backbone, change loss, add regularization, new features). Use when the current model underfits or overfits.
+- **Tier 3: Paradigm Shift** — Fundamentally change the approach (different algorithm family, ensemble, pseudo-labeling). Use when the current approach has hit a hard ceiling.
+
+**Proposed Changes** (list each):
+- What: The specific technical modification
+- Why: Why THIS task needs this change (not generic advice)
+
+**What Stays Unchanged:**
+- List key components that must remain identical for controlled comparison
+  (e.g., data split, random seed, core model architecture)
+
 Here is the feedback to analyze:
 {feedback}
 
-Produce a concise plan describing what to change and why.
+Produce a concise plan following this structure.
 """
 
         try:
@@ -987,8 +1033,11 @@ Produce a concise plan describing what to change and why.
                 env_overrides=planner_env,
                 max_turns=30,
                 allowed_tools=[],
+                log_file=str(self.codebase.codebase_dir / ".evorun_claude.log"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
+                stage="planner",
+                print_output=False,
             )
             return result.strip()
         except Exception as e:
@@ -1040,6 +1089,8 @@ You are a senior Python developer implementing a code improvement plan.
                 log_file=str(self.codebase.codebase_dir / ".evorun_claude.log"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
+                stage="editor",
+                print_output=False,
             )
             return result
         except Exception as e:
@@ -1307,6 +1358,7 @@ You are a senior Python developer implementing a code improvement plan.
         prev_eval = "\n".join(prev_eval_parts)
 
         log_content: str = ""
+        planner_output: str = ""
         modified_files: list[str] = []
         added_files: list[str] = []
         deleted_files: list[str] = []
@@ -1323,8 +1375,9 @@ You are a senior Python developer implementing a code improvement plan.
             if do_fusion:
                 # Try cross-branch fusion first
                 _run_logger.info(f"[Iter {self._iteration}] Trying cross-branch fusion...")
-                _, log_content, modified_files, added_files, deleted_files, used_fusion = \
+                fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion = \
                     self._run_fusion(target_node)
+                planner_output = fusion_plan
 
         # Build feedback (always, for logging and next iteration)
         parent_score = target_node.parent.metric.value if target_node.parent and target_node.parent.metric else None
@@ -1339,6 +1392,7 @@ You are a senior Python developer implementing a code improvement plan.
                 )
 
                 plan = self._run_planner(feedback)
+                planner_output = plan
                 if plan and plan.strip():
                     _run_logger.info(f"[Iter {self._iteration}] Running editor with plan...")
                     log_content = self._run_editor(plan, feedback)
@@ -1623,6 +1677,8 @@ You are a senior Python developer implementing a code improvement plan.
             edit_summary=edit_summary,
             diff_text=diff_text,
         ))
+        if planner_output:
+            log_content = planner_output + "\n\n---\n\n" + log_content
         self.history[-1].claude_log = log_content or ""
         self.history[-1].claude_feedback = feedback or ""
 
@@ -2216,11 +2272,13 @@ You are a senior Python developer implementing a code improvement plan.
     # ─── Fusion agent ───────────────────────────────────────────────
 
     def _find_fusion_candidates(self, target_node, max_candidates=3):
-        """Find cross-branch fusion candidates from the search tree.
+        """Find the best UCT-scored nodes in the tree as fusion candidates.
 
-        Scans all nodes in the tree for high-scoring nodes from different
-        branches than the target. Falls back to same-branch candidates
-        if no cross-branch candidates exist.
+        Reuses the tree's `_score_candidate` method (UCT + exploration bonuses)
+        to pick the top N nodes, excluding the target node. This ensures fusion
+        candidates benefit from the same scoring logic used during selection —
+        broken nodes, unvisited nodes, and well-explored nodes are all scored
+        consistently.
 
         Args:
             target_node: The SearchNode being expanded.
@@ -2228,60 +2286,17 @@ You are a senior Python developer implementing a code improvement plan.
 
         Returns:
             List of SearchNode objects (the reference solutions to fuse from),
-            sorted by score descending.
+            sorted by UCT score descending.
         """
-        target_branch_id = getattr(target_node, 'branch_id', None)
-        candidates = []
-        cross_branch_scores: dict[int, float] = {}
-
-        for node in self.tree.journal.nodes:
-            if node.id == target_node.id:
-                continue
-            if node is self.tree.root:
-                continue
-            score = node.metric.value if node.metric else None
-            if score is None:
-                continue
-            node_branch = getattr(node, 'branch_id', None)
-            if node_branch is None:
-                continue
-            if self.tree.maximize:
-                if node_branch not in cross_branch_scores or score > cross_branch_scores[node_branch]:
-                    cross_branch_scores[node_branch] = score
-            else:
-                if node_branch not in cross_branch_scores or score < cross_branch_scores[node_branch]:
-                    cross_branch_scores[node_branch] = score
-
-        for bid, s in cross_branch_scores.items():
-            if target_branch_id is not None and bid == target_branch_id:
-                continue
-            for node in self.tree.journal.nodes:
-                if getattr(node, 'branch_id', None) == bid and node.metric and node.metric.value == s:
-                    candidates.append(node)
-                    break
-            if len(candidates) >= max_candidates:
-                break
-
-        if not candidates:
-            for node in self.tree.journal.nodes:
-                if node.id == target_node.id:
-                    continue
-                if node is self.tree.root:
-                    continue
-                if getattr(node, 'branch_id', None) == target_branch_id:
-                    score = node.metric.value if node.metric else None
-                    if score is not None:
-                        candidates.append(node)
-                        if len(candidates) >= max_candidates:
-                            break
-
-        candidates.sort(
-            key=lambda n: n.metric.value if n.metric else 0,
-            reverse=self.tree.maximize,
-        )
+        candidates = [
+            node for node in self.tree.journal.nodes
+            if node.id != target_node.id
+            and node is not self.tree.root
+        ]
+        candidates.sort(key=self.tree._score_candidate, reverse=True)
         return candidates[:max_candidates]
 
-    def _run_fusion(self, target_node) -> tuple[str | None, str, list[str], list[str], list[str], bool]:
+    def _run_fusion(self, target_node) -> tuple[str, str, list[str], list[str], list[str], bool]:
         """Run cross-branch fusion: merge techniques from other branches into the current node.
 
         Finds fusion candidates from other branches, builds a prompt that asks
@@ -2291,8 +2306,7 @@ You are a senior Python developer implementing a code improvement plan.
             target_node: The SearchNode being expanded.
 
         Returns:
-  Tuple of (log_content, modified_files, added_files, deleted_files, used_fusion).
-            None is returned as the first element (response_text) since Claude CLI output is in log_content.
+            Tuple of (fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion).
         """
         candidates = self._find_fusion_candidates(target_node, max_candidates=3)
 
@@ -2305,9 +2319,9 @@ You are a senior Python developer implementing a code improvement plan.
         reference_sections = []
         for i, ref_node in enumerate(candidates):
             ref_score = ref_node.metric.value if ref_node.metric else "N/A"
-            ref_branch = getattr(ref_node, 'branch_id', '?')
+            ref_q = ref_node.total_reward / max(ref_node.visits, 1)
             reference_sections.append(
-                f"## Reference Solution {i + 1} (Branch {ref_branch}, Score: {ref_score})\n"
+                f"## Reference Solution {i + 1} (Score: {ref_score}, Q: {ref_q:.4f})\n"
                 f"```\n{ref_node.code}\n```\n"
             )
 
@@ -2337,13 +2351,32 @@ IMPORTANT RULES:
 1. Do NOT write any code. Do NOT use Read, Edit, or Write tools.
 2. Describe changes in plain language — the editor will implement them.
 
+## Required Analysis
+
+**Reference Analysis** — For each reference solution:
+- Why did it succeed? What specific technique or design choice drove its performance?
+- What is the core mechanism, not just what it does?
+
+**Compatibility Check** — For each candidate technique:
+- Does it fit with the current architecture? Will it integrate cleanly?
+- Are there conflicts with existing components?
+
+**Proposed Fusion Plan**:
+- What: The specific technique(s) to incorporate and from which reference
+- Why: Why this technique addresses a limitation in the current solution
+- How: How it will be integrated (which file, which function/section)
+- Keep unchanged: What stays the same
+
+Key principle: Fusion means understanding WHY techniques work, not blindly copying.
+One well-integrated technique is better than a messy combination of several.
+
 ## Current Codebase
 {codebase_prompt}
 
 ## Reference Solutions
 {''.join(reference_sections)}
 
-Produce a concise plan describing what techniques to incorporate and how.
+Produce a concise fusion plan following this structure.
 """
         fusion_plan = ""
         try:
@@ -2355,8 +2388,11 @@ Produce a concise plan describing what techniques to incorporate and how.
                 env_overrides=fusion_planner_env,
                 max_turns=30,
                 allowed_tools=[],
+                log_file=str(self.codebase.codebase_dir / ".evorun_claude.log"),
                 retries=2,
                 retry_base_delay=3.0,
+                stage="planner",
+                print_output=False,
             ).strip()
         except Exception as e:
             _run_logger.warning(f"[Fusion] Planner failed: {e}")
@@ -2388,6 +2424,11 @@ You are implementing a cross-branch fusion plan.
 
 Focus on quality over quantity: one well-integrated technique is better than
 a messy combination of several.
+
+## Integration Checklist
+- Verify the adopted technique is compatible with existing variable names and function signatures
+- Ensure the technique addresses a real limitation, not just copied for variety
+- Preserve the current solution's strengths that are not mentioned in the fusion plan
 """
             try:
                 log_content = _run_claude_cli_with_env(
@@ -2400,6 +2441,8 @@ a messy combination of several.
                     log_file=str(self.codebase.codebase_dir / ".evorun_claude.log"),
                     retries=2,
                     retry_base_delay=3.0,
+                    stage="editor",
+                    print_output=False,
                 )
             except Exception as e:
                 _run_logger.error(f"[Fusion] Editor CLI failed: {e}")
@@ -2426,7 +2469,7 @@ a messy combination of several.
         else:
             _run_logger.info(f"[Fusion] Fusion produced no changes — falling back to normal Claude")
 
-        return None, log_content, modified_files, added_files, deleted_files, used_fusion
+        return fusion_plan, log_content, modified_files, added_files, deleted_files, used_fusion
 
     def _format_file_changes(self) -> list[str]:
         """Format file changes section if any files were modified/added/deleted.
@@ -2703,6 +2746,38 @@ a messy combination of several.
             return []
         recent = self.history[-5:]
         history_lines: list[str] = []
+
+        # Collect scored entries for trend analysis
+        scored = [e for e in recent if e.score is not None]
+        if len(scored) >= 2:
+            scores = [e.score for e in scored]
+            first_half = scores[:len(scores)//2]
+            second_half = scores[len(scores)//2:]
+            avg_first = sum(first_half) / len(first_half)
+            avg_second = sum(second_half) / len(second_half)
+            delta = avg_second - avg_first
+            if self.tree.maximize:
+                if delta > 0.005:
+                    trend = f"Trend: improving (+{delta:.4f} avg over last {len(scored)})"
+                elif delta < -0.005:
+                    trend = f"Trend: declining ({delta:+.4f} avg over last {len(scored)})"
+                else:
+                    trend = f"Trend: stagnant ({delta:+.4f} avg over last {len(scored)})"
+            else:
+                if delta < -0.005:
+                    trend = f"Trend: improving ({delta:+.4f} avg over last {len(scored)})"
+                elif delta > 0.005:
+                    trend = f"Trend: declining ({delta:+.4f} avg over last {len(scored)})"
+                else:
+                    trend = f"Trend: stagnant ({delta:+.4f} avg over last {len(scored)})"
+            history_lines.append(trend)
+
+            # Highlight best iteration
+            best_entry = max(scored, key=lambda e: e.score if self.tree.maximize else -e.score)
+            history_lines.append(
+                f"Best: Iter {best_entry.iter} (score={best_entry.score:.4f})"
+            )
+
         for entry in recent:
             et = entry.exec_time if entry.exec_time is not None else 0.0
             summary = entry.edit_summary
@@ -3205,10 +3280,6 @@ def parse_args() -> argparse.Namespace:
         "--reset",
         action="store_true",
         help="Delete any existing state file and start fresh",
-    )
-    parser.add_argument(
-        "--model", "-m", default="claude-sonnet-4-6",
-        help="Claude model name (default: claude-sonnet-4-6)",
     )
     parser.add_argument(
         "--max-iters", type=int, default=50,
