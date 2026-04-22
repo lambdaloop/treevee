@@ -6,11 +6,20 @@ This is me messing around with automatic optimization with LLMs, based on [MLEvo
 
 ```
 my_project/
-├── experiment/   # code the LLM edits
-├── eval.py       # prints {"score": <float>} to stdout
+├── experiment/   # folder with code/params the LLM edits
+├── eval.py       # default eval script 
+├── pixi.toml     # default environment for running eval.py
 ├── TASK.md       # describes the task and objective
 └── config.toml   # optional, see config.example.toml
 ```
+
+By default it runs `pixi run python eval.py` and expects it to print something like `{"score": <float>, "description": "more detailed metrics as string"}`
+in the last line to stdout. Any other output is allowed, just make sure the very last line is structured like that!
+You can configure the eval command in the config.toml with the `eval_cmd` parameter.
+
+You can have any other files in the `my_project` folder, the LLM will edit only the `experiment/` subfolder.
+
+One nice structure that I use is having a separate `code/` subfolder for my codebase, and then symlink the relevant files from `experiment/` to `code/` so the structure is maintained for my project.
 
 ## Commands
 
