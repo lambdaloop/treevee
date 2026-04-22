@@ -1,3 +1,5 @@
+const rootDiffCache = {};
+
 const stageColors = {
   root: '#f7c2e0',
   improve: '#d4b0e8',
@@ -416,14 +418,25 @@ function showNodeDetailToBottom(nodeData) {
 
   }
 
-  // Diff (always shown)
+  // Diff (with vs-parent / vs-root toggle)
   html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;">';
-  html += '<h4 style="color:var(--accent-lavender);margin-bottom:6px;font-size:13px;">Code Diff (vs parent)</h4>';
+  html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
+  html += '<h4 style="color:var(--accent-lavender);font-size:13px;margin:0;">Code Diff</h4>';
+  if (!isRoot) {
+    const btnBase = 'border:1px solid var(--border-color);border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;';
+    html += `<button id="diff-toggle-parent" style="${btnBase}background:var(--accent-lavender);color:var(--bg-primary);">vs parent</button>`;
+    html += `<button id="diff-toggle-root" style="${btnBase}background:var(--bg-tertiary);color:var(--accent-lavender);">vs root</button>`;
+  }
+  html += '</div>';
+  html += '<div id="diff-content">';
   if (historyEntry?.diff_text && historyEntry.diff_text.trim()) {
     html += renderDiffHTML(historyEntry.diff_text);
+  } else if (isRoot) {
+    html += '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">This is the root node.</p>';
   } else {
     html += '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">No diff available (no history entry for this step).</p>';
   }
+  html += '</div>';
   html += '</div>';
 
   // Eval output / Error output
@@ -530,6 +543,53 @@ function showNodeDetailToBottom(nodeData) {
   diffSection.style.display = 'block';
   closeBtn.style.display = 'inline-block';
   diffSection.scrollIntoView({ behavior: 'smooth' });
+
+  // Diff toggle (vs parent / vs root)
+  const toggleParent = diffOutput.querySelector('#diff-toggle-parent');
+  const toggleRoot = diffOutput.querySelector('#diff-toggle-root');
+  if (toggleParent && toggleRoot) {
+    const diffContent = diffOutput.querySelector('#diff-content');
+    const activeBtnStyle = 'background:var(--accent-lavender);color:var(--bg-primary);';
+    const inactiveBtnStyle = 'background:var(--bg-tertiary);color:var(--accent-lavender);';
+
+    function showParentDiff() {
+      toggleParent.style.cssText = toggleParent.style.cssText.replace(/background:[^;]+;color:[^;]+;/, activeBtnStyle);
+      toggleRoot.style.cssText = toggleRoot.style.cssText.replace(/background:[^;]+;color:[^;]+;/, inactiveBtnStyle);
+      if (historyEntry?.diff_text && historyEntry.diff_text.trim()) {
+        diffContent.innerHTML = renderDiffHTML(historyEntry.diff_text);
+      } else {
+        diffContent.innerHTML = '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">No diff available (no history entry for this step).</p>';
+      }
+    }
+
+    async function showRootDiff() {
+      toggleRoot.style.cssText = toggleRoot.style.cssText.replace(/background:[^;]+;color:[^;]+;/, activeBtnStyle);
+      toggleParent.style.cssText = toggleParent.style.cssText.replace(/background:[^;]+;color:[^;]+;/, inactiveBtnStyle);
+      if (rootDiffCache[nodeData.id] !== undefined) {
+        const cached = rootDiffCache[nodeData.id];
+        diffContent.innerHTML = cached ? renderDiffHTML(cached) : '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">No changes from root.</p>';
+        return;
+      }
+      diffContent.innerHTML = '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">Loading root diff\u2026</p>';
+      try {
+        const res = await fetch(`/api/diff_from_root?node_id=${encodeURIComponent(nodeData.id)}`);
+        const data = await res.json();
+        if (!res.ok) {
+          diffContent.innerHTML = `<p style="color:var(--accent-peach); padding:4px 0; font-size:12px;">Could not compute root diff: ${escapeHtml(data.error || res.statusText)}</p>`;
+          return;
+        }
+        rootDiffCache[nodeData.id] = data.diff_text || '';
+        diffContent.innerHTML = data.diff_text?.trim()
+          ? renderDiffHTML(data.diff_text)
+          : '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">No changes from root.</p>';
+      } catch (e) {
+        diffContent.innerHTML = `<p style="color:var(--accent-peach); padding:4px 0; font-size:12px;">Error fetching root diff.</p>`;
+      }
+    }
+
+    toggleParent.addEventListener('click', showParentDiff);
+    toggleRoot.addEventListener('click', showRootDiff);
+  }
 
   // Handle expand button
   const expandBtn = diffOutput.querySelector('.expand-btn');

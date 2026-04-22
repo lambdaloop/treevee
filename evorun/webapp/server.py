@@ -9,6 +9,7 @@ Otherwise, shows file upload UI.
 """
 
 import argparse
+import difflib
 import http.server
 import json
 import math
@@ -17,6 +18,7 @@ import sys
 import threading
 import webbrowser
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 
 STATE_FILE = ".evorun_state.json"
@@ -57,6 +59,9 @@ class EvorunHandler(http.server.SimpleHTTPRequestHandler):
         if self.path == "/api/state":
             self._serve_state()
             return
+        if self.path.startswith("/api/diff_from_root"):
+            self._serve_diff_from_root()
+            return
         return super().do_GET()
 
     @staticmethod
@@ -84,6 +89,106 @@ class EvorunHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json(200, self._sanitize(data))
         except json.JSONDecodeError as e:
             self._send_json(500, {"error": f"Invalid JSON: {e}"})
+
+    def _serve_diff_from_root(self):
+        if not self.state_folder:
+            self._send_json(404, {"error": "No folder configured"})
+            return
+        qs = parse_qs(urlparse(self.path).query)
+        node_ids = qs.get("node_id", [])
+        if not node_ids:
+            self._send_json(400, {"error": "Missing node_id parameter"})
+            return
+        node_id = node_ids[0]
+
+        state_path = os.path.join(self.state_folder, STATE_FILE)
+        try:
+            with open(state_path) as f:
+                state = json.load(f)
+        except Exception as e:
+            self._send_json(500, {"error": f"Could not read state: {e}"})
+            return
+
+        nodes = state.get("tree_structure", {}).get("nodes", [])
+        root_node = next((n for n in nodes if n.get("parent_id") is None), None)
+        target_node = next((n for n in nodes if n.get("id") == node_id), None)
+
+        if not root_node:
+            self._send_json(404, {"error": "Root node not found in state"})
+            return
+        if not target_node:
+            self._send_json(404, {"error": f"Node {node_id} not found in state"})
+            return
+
+        snaps_dir = os.path.join(self.state_folder, ".evorun_snapshots")
+
+        def find_snap(node):
+            named = os.path.join(snaps_dir, f"iter_snapshot_{node['id'][:8]}")
+            if os.path.isdir(named):
+                return named
+            pre = os.path.join(snaps_dir, f"iter_snapshot_pre_{node['step']}")
+            if os.path.isdir(pre):
+                return pre
+            return None
+
+        root_snap = find_snap(root_node)
+        node_snap = find_snap(target_node)
+
+        if root_snap and node_snap:
+            diff_text = self._compute_snapshots_diff(root_snap, node_snap)
+            self._send_json(200, {"diff_text": diff_text})
+            return
+
+        # Fall back: chain history diff_texts along parent path to this node.
+        node_by_id = {n["id"]: n for n in nodes}
+        history_by_step = {e["iter"]: e for e in state.get("history", [])}
+
+        path_steps = []
+        cur = target_node
+        while cur and cur.get("parent_id") is not None:
+            entry = history_by_step.get(cur["step"])
+            if entry and entry.get("diff_text", "").strip():
+                path_steps.append(entry["diff_text"])
+            cur = node_by_id.get(cur["parent_id"])
+        path_steps.reverse()
+
+        self._send_json(200, {"diff_text": "\n".join(path_steps)})
+
+    @staticmethod
+    def _compute_snapshots_diff(root_snap: str, node_snap: str) -> str:
+        root_path = Path(root_snap)
+        node_path = Path(node_snap)
+
+        def collect_files(base: Path) -> dict[str, str]:
+            files = {}
+            for p in sorted(base.rglob("*")):
+                if p.is_file() and p.name != ".deleted_files":
+                    rel = str(p.relative_to(base))
+                    try:
+                        files[rel] = p.read_text(encoding="utf-8", errors="replace")
+                    except Exception:
+                        pass
+            return files
+
+        root_files = collect_files(root_path)
+        node_files = collect_files(node_path)
+        all_paths = sorted(set(root_files) | set(node_files))
+
+        parts = []
+        for rel in all_paths:
+            old_text = root_files.get(rel, "")
+            new_text = node_files.get(rel, "")
+            if old_text == new_text:
+                continue
+            diff = difflib.unified_diff(
+                old_text.splitlines(keepends=True),
+                new_text.splitlines(keepends=True),
+                fromfile=f"a/{rel}",
+                tofile=f"b/{rel}",
+            )
+            parts.append("".join(diff))
+
+        return "\n".join(parts) if parts else ""
 
     def _send_json(self, code, data):
         body = json.dumps(data).encode("utf-8")

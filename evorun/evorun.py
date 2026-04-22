@@ -149,6 +149,7 @@ class HistoryEntry:
     planner_output: str = ""
     editor_input: str = ""
     editor_output: str = ""
+    is_duplicate: bool = False
 
 
 # ────────────────────────────────────────────────────────────
@@ -834,6 +835,7 @@ class EvoRunAgent:
                 planner_output=e.get("planner_output", ""),
                 editor_input=e.get("editor_input", ""),
                 editor_output=e.get("editor_output", ""),
+                is_duplicate=e.get("is_duplicate", False),
             )
             h.claude_feedback = e.get("claude_feedback", "")
             all_history.append(h)
@@ -1870,13 +1872,18 @@ Do not try to improve the score — just fix the errors.
             # Do NOT increment parent stagnation for duplicate code — the LLM
             # repeated a previously-seen solution, which is an LLM failure not
             # a parent failure.  The consecutive_no_changes counter covers this.
-            # Record as a skipped iteration
+            # Record as a duplicate iteration (full I/O preserved for inspection)
             self.history.append(HistoryEntry(
                 iter=self._iteration, score=None,
                 timed_out=False, exec_time=0.0,
                 datetime=datetime.now().isoformat(),
                 files_modified=[], files_added=[], files_deleted=[],
                 llm_response="", edit_summary="", diff_text="",
+                planner_input=(planner_input or "").strip(),
+                planner_output=(planner_output or "").strip(),
+                editor_input=(editor_input or "").strip(),
+                editor_output=(log_content or "").strip(),
+                is_duplicate=True,
             ))
             self._iteration += 1
             self.save_state()
@@ -1906,7 +1913,7 @@ Do not try to improve the score — just fix the errors.
 
         # Rename pre-snapshot to child's actual snapshot name.
         if pre_snap_dir:
-            old_name = Path(pre_snap_dir)
+            old_name = self.codebase.codebase_dir / ".evorun_snapshots" / pre_snap_dir
             new_name = (
                 self.codebase.codebase_dir / ".evorun_snapshots"
                 / f"iter_snapshot_{child_node.id[:8]}"
@@ -2223,6 +2230,8 @@ Do not try to improve the score — just fix the errors.
         """Find the snapshot directory for a tree node.
 
         Node snapshots are named iter_snapshot_<node.id[:8]>.
+        Falls back to iter_snapshot_pre_<step> for runs where the rename
+        did not complete (e.g. pre-bugfix runs or interrupted processes).
 
         Args:
             node: The SearchNode to look up.
@@ -2230,10 +2239,13 @@ Do not try to improve the score — just fix the errors.
         Returns:
             Path string if found, None otherwise.
         """
-        target_name = f"iter_snapshot_{node.id[:8]}"
-        snap_dir = self.codebase.codebase_dir / ".evorun_snapshots" / target_name
-        if snap_dir.exists():
-            return str(snap_dir)
+        snaps = self.codebase.codebase_dir / ".evorun_snapshots"
+        named = snaps / f"iter_snapshot_{node.id[:8]}"
+        if named.exists():
+            return str(named)
+        pre = snaps / f"iter_snapshot_pre_{node.step}"
+        if pre.exists():
+            return str(pre)
         return None
 
     def _read_snapshot_code(self, node_or_snap_dir: Any, *, snap_dir: str | None = None) -> str:
@@ -3769,6 +3781,26 @@ def parse_args() -> argparse.Namespace:
         help="Restore a specific node by its ID",
     )
 
+    tree_parser = subparsers.add_parser(
+        "tree",
+        help="Print a tree summary of the run with scores and edit summaries",
+    )
+    tree_parser.add_argument(
+        "--path",
+        default=".",
+        help="Path to the codebase directory with the state file (default: current directory)",
+    )
+
+    history_parser = subparsers.add_parser(
+        "history",
+        help="Print iterations in chronological order with scores and edit summaries",
+    )
+    history_parser.add_argument(
+        "--path",
+        default=".",
+        help="Path to the codebase directory with the state file (default: current directory)",
+    )
+
     args = parser.parse_args()
     return args
 
@@ -4079,31 +4111,156 @@ def _cmd_restore(args: argparse.Namespace) -> None:
         _run_logger.error(f"Failed to read state file: {e}")
         sys.exit(1)
 
+    nodes_by_id = {
+        n["id"]: n
+        for n in state.get("tree_structure", {}).get("nodes", [])
+    }
+
+    def resolve_snapshot(node_id: str) -> str:
+        """Return the best available snapshot name for a node ID."""
+        named = f"iter_snapshot_{node_id[:8]}"
+        if (codebase_dir / ".evorun_snapshots" / named).exists():
+            return named
+        node = nodes_by_id.get(node_id)
+        if node is not None:
+            pre = f"iter_snapshot_pre_{node['step']}"
+            if (codebase_dir / ".evorun_snapshots" / pre).exists():
+                return pre
+        return named  # let _restore_snapshot emit the not-found message
+
     if args.node:
-        # Restore a specific node by ID.
-        snapshot_name = f"iter_snapshot_{args.node[:8]}"
+        full_id = next(
+            (nid for nid in nodes_by_id if nid.startswith(args.node)), args.node
+        )
+        snapshot_name = resolve_snapshot(full_id)
     elif args.root:
-        # Restore the root node snapshot.
         tree = state.get("tree_structure", {})
         root_id = tree.get("root_id")
         if not root_id:
             _run_logger.error("No root_id found in state file")
             sys.exit(1)
-        snapshot_name = f"iter_snapshot_{root_id[:8]}"
+        snapshot_name = resolve_snapshot(root_id)
     else:
         # Restore the best checkpoint.
         snapshot_name = state.get("best_snapshot_iteration")
         if not snapshot_name:
             _run_logger.error("No best snapshot found in state file")
             sys.exit(1)
+        # best_snapshot_iteration may itself be a pre-snapshot name — resolve
+        # it via the node ID if it looks like a named snapshot.
+        if snapshot_name.startswith("iter_snapshot_") and not snapshot_name.startswith("iter_snapshot_pre_"):
+            snap_id_prefix = snapshot_name.removeprefix("iter_snapshot_")
+            matching = next(
+                (nid for nid in nodes_by_id if nid[:8] == snap_id_prefix), None
+            )
+            if matching:
+                snapshot_name = resolve_snapshot(matching)
 
     _restore_snapshot(codebase_dir, snapshot_name)
+
+
+def _cmd_history(args: argparse.Namespace) -> None:
+    """Print iterations in chronological order with scores and edit summaries."""
+    codebase_dir = Path(args.path)
+    state_path = codebase_dir / ".evorun_state.json"
+
+    if not state_path.exists():
+        _run_logger.error(f"No state file found at: {state_path}")
+        sys.exit(1)
+
+    try:
+        with open(state_path, "r", encoding="utf-8") as fh:
+            state = json.load(fh)
+    except Exception as e:
+        _run_logger.error(f"Failed to read state file: {e}")
+        sys.exit(1)
+
+    nodes_by_step = {n["step"]: n for n in state.get("tree_structure", {}).get("nodes", [])}
+    best_snap = state.get("best_snapshot_iteration", "")
+    best_id_prefix = best_snap.removeprefix("iter_snapshot_") if best_snap else ""
+
+    entries = sorted(state.get("history", []), key=lambda e: e["iter"])
+    if not entries:
+        print("No history entries.")
+        return
+
+    for entry in entries:
+        step = entry["iter"]
+        score = entry.get("score")
+        summary = entry.get("edit_summary", "").strip()
+        node = nodes_by_step.get(step)
+        short_id = node["id"][:8] if node else "????????"
+        is_best = short_id == best_id_prefix[:8] if best_id_prefix else False
+
+        is_dup = entry.get("is_duplicate", False) or (node is None and score is None and not summary)
+        score_str = f"{score:.4f}" if score is not None else "   n/a"
+        best_marker = " ★" if is_best else ""
+        if is_dup:
+            print(f"[{step:>4}] (duplicate — skipped)")
+        else:
+            summary_str = f"  {summary}" if summary else ""
+            print(f"[{step:>4}] [{short_id}] score={score_str}{best_marker}{summary_str}")
+
+
+def _cmd_tree(args: argparse.Namespace) -> None:
+    """Print a tree summary of the run to stdout."""
+    codebase_dir = Path(args.path)
+    state_path = codebase_dir / ".evorun_state.json"
+
+    if not state_path.exists():
+        _run_logger.error(f"No state file found at: {state_path}")
+        sys.exit(1)
+
+    try:
+        with open(state_path, "r", encoding="utf-8") as fh:
+            state = json.load(fh)
+    except Exception as e:
+        _run_logger.error(f"Failed to read state file: {e}")
+        sys.exit(1)
+
+    nodes = {n["id"]: n for n in state.get("tree_structure", {}).get("nodes", [])}
+    history = {e["iter"]: e for e in state.get("history", [])}
+    best_snap = state.get("best_snapshot_iteration", "")
+    best_id_prefix = best_snap.removeprefix("iter_snapshot_") if best_snap else ""
+
+    # Build children map.
+    children: dict[str | None, list[str]] = {}
+    for nid, node in nodes.items():
+        parent = node.get("parent_id")
+        children.setdefault(parent, []).append(nid)
+
+    stage_icons = {"root": "🌸", "improve": "✨", "debug": "💬", "draft": "🌟", "fusion": "🔀"}
+
+    def print_node(nid: str, prefix: str, is_last: bool) -> None:
+        node = nodes[nid]
+        connector = "└── " if is_last else "├── "
+        icon = stage_icons.get(node.get("stage", ""), "•")
+        short = nid[:8]
+        score = node.get("score")
+        score_str = f"{score:.4f}" if score is not None else "  n/a "
+        is_best = short == best_id_prefix or (best_id_prefix and nid[:8] == best_id_prefix[:8])
+        best_marker = " ★" if is_best else ""
+        entry = history.get(node.get("step", -1))
+        summary = entry.get("edit_summary", "").strip() if entry else ""
+        summary_str = f"  {summary}" if summary else ""
+        print(f"{prefix}{connector}{icon} [{short}] score={score_str}{best_marker}{summary_str}")
+        kids = sorted(children.get(nid, []), key=lambda k: nodes[k].get("step", 0))
+        child_prefix = prefix + ("    " if is_last else "│   ")
+        for i, kid in enumerate(kids):
+            print_node(kid, child_prefix, i == len(kids) - 1)
+
+    root_id = state.get("tree_structure", {}).get("root_id")
+    if not root_id:
+        _run_logger.error("No root_id in state file")
+        sys.exit(1)
+
+    print_node(root_id, "", True)
 
 
 def main() -> None:
     """Entry point for evorun.
 
-    Dispatches to subcommand handlers: run, viz, init, restore.
+    Dispatches to subcommand handlers: run, viz, init, restore, tree.
     """
     _setup_logging()
     args = parse_args()
@@ -4116,6 +4273,10 @@ def main() -> None:
         _cmd_init(args)
     elif args.command == "restore":
         _cmd_restore(args)
+    elif args.command == "tree":
+        _cmd_tree(args)
+    elif args.command == "history":
+        _cmd_history(args)
     else:
         # Should not reach here since required=True on subparsers.
         parser = argparse.ArgumentParser(
