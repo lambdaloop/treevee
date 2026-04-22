@@ -750,6 +750,24 @@ class EvoRunAgent:
         signal.signal(signal.SIGINT, _signal_handler)
         signal.signal(signal.SIGTERM, _signal_handler)
 
+    def _check_rate_limit(self, output: str) -> bool:
+        """Check if Claude CLI output indicates a rate limit / quota exhaustion.
+
+        If detected, sets self._stop and logs a message.
+
+        Args:
+            output: The raw output string from the Claude CLI.
+
+        Returns:
+            True if a rate limit was detected, False otherwise.
+        """
+        if _RATE_LIMIT_RE.search(output):
+            _run_logger.error("[LLM] Rate limit / quota exhausted — stopping run.")
+            self._stop = True
+            self.save_state()
+            return True
+        return False
+
     def _attempt_resume(self) -> bool:
         """Try to resume from a saved state file.
 
@@ -1039,6 +1057,8 @@ Produce a concise plan following this structure.
                 stage="planner",
                 print_output=False,
             )
+            if self._check_rate_limit(result):
+                return ""
             return result.strip()
         except Exception as e:
             _run_logger.warning(f"Planner failed (iter {self._iteration}): {e}")
@@ -1092,6 +1112,8 @@ You are a senior Python developer implementing a code improvement plan.
                 stage="editor",
                 print_output=False,
             )
+            if self._check_rate_limit(result):
+                return ""
             return result
         except Exception as e:
             _run_logger.warning(f"Editor failed (iter {self._iteration}): {e}")
@@ -2381,7 +2403,7 @@ Produce a concise fusion plan following this structure.
         fusion_plan = ""
         try:
             fusion_planner_env = _build_claude_env(self.planner_provider, self.planner_model, self.planner_api_key)
-            fusion_plan = _run_claude_cli_with_env(
+            fusion_plan_raw = _run_claude_cli_with_env(
                 prompt=fusion_feedback,
                 cwd=str(self.codebase.codebase_dir),
                 model=self.planner_model,
@@ -2393,7 +2415,9 @@ Produce a concise fusion plan following this structure.
                 retry_base_delay=3.0,
                 stage="planner",
                 print_output=False,
-            ).strip()
+            )
+            if not self._check_rate_limit(fusion_plan_raw):
+                fusion_plan = fusion_plan_raw.strip()
         except Exception as e:
             _run_logger.warning(f"[Fusion] Planner failed: {e}")
             fusion_plan = ""
@@ -2444,6 +2468,8 @@ a messy combination of several.
                     stage="editor",
                     print_output=False,
                 )
+                if self._check_rate_limit(log_content):
+                    log_content = ""
             except Exception as e:
                 _run_logger.error(f"[Fusion] Editor CLI failed: {e}")
                 log_content = ""
