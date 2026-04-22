@@ -53,6 +53,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 import hashlib
+import tomllib
 
 from evorun.tree_search import TreeSearch
 from evorun.utils.metric import MetricValue
@@ -550,6 +551,133 @@ def _run_claude_cli(prompt: str, cwd: str, model: str = "claude-sonnet-4-6",
     raise RuntimeError(f"Claude CLI failed after {retries} retries")
 
 
+_UNSET = object()  # sentinel for "explicitly unset this env var"
+
+
+def _build_claude_env(provider: str, model: str, api_key: str | None) -> dict[str, object]:
+    """Build env var overrides for the claude CLI based on provider.
+
+    Returns a dict where:
+    - string values override the env var
+    - _UNSET means explicitly delete the env var
+    """
+    env: dict[str, object] = {}
+    if provider == "anthropic":
+        env["ANTHROPIC_BASE_URL"] = _UNSET
+        env["ANTHROPIC_API_KEY"] = _UNSET
+        env["ANTHROPIC_MODEL"] = _UNSET
+        env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = _UNSET
+    elif provider == "deepseek":
+        env["ANTHROPIC_BASE_URL"] = "https://api.deepseek.com/anthropic"
+        env["ANTHROPIC_API_KEY"] = api_key
+        env["ANTHROPIC_MODEL"] = model
+        env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model
+        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+    elif provider == "openrouter":
+        env["ANTHROPIC_BASE_URL"] = "https://openrouter.ai/api"
+        env["ANTHROPIC_API_KEY"] = ""
+        env["ANTHROPIC_MODEL"] = model
+        env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model
+    else:
+        # URL mode
+        env["ANTHROPIC_BASE_URL"] = provider
+        env["ANTHROPIC_API_KEY"] = api_key
+        env["ANTHROPIC_MODEL"] = model
+        env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model
+    return env
+
+
+def _merge_env(env_overrides: dict[str, object]) -> dict[str, str]:
+    """Merge env var overrides with current os.environ, handling _UNSET."""
+    env = os.environ.copy()
+    for key, value in env_overrides.items():
+        if value is _UNSET:
+            env.pop(key, None)
+        else:
+            env[key] = str(value)
+    return env
+
+
+def _run_claude_cli_with_env(
+    prompt: str,
+    cwd: str,
+    model: str,
+    env_overrides: dict[str, object],
+    max_turns: int = 500,
+    allowed_tools: list[str] | None = None,
+    log_file: str | None = None,
+    retries: int = 3,
+    retry_base_delay: float = 5.0,
+) -> str:
+    """Run claude CLI with env var overrides (for provider switching)."""
+    import time
+
+    merged_env = _merge_env(env_overrides)
+
+    def _do_call():
+        cmd = [
+            'claude',
+            '-p', prompt,
+            '--output-format', 'text',
+            '--max-turns', str(max_turns),
+            '--model', model,
+        ]
+        if allowed_tools:
+            cmd.extend(['--allowedTools'] + allowed_tools)
+
+        log_fh = open(log_file, "w", encoding="utf-8") if log_file else None
+        process = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env=merged_env,
+        )
+        output_lines = []
+        try:
+            for line in process.stdout:
+                print(line, end='', flush=True)
+                output_lines.append(line)
+                if log_fh:
+                    log_fh.write(line)
+        finally:
+            if log_fh:
+                log_fh.close()
+        process.wait()
+        result = "".join(output_lines)
+        if not result:
+            raise RuntimeError("claude CLI returned empty output")
+        return result
+
+    for attempt in range(1, retries + 1):
+        try:
+            return _do_call()
+        except Exception as e:
+            _run_logger.warning(
+                f"Claude CLI failed (attempt {attempt}/{retries}): {e}"
+            )
+            if attempt < retries:
+                time.sleep(retry_base_delay * (2 ** (attempt - 1)))
+    raise RuntimeError(f"Claude CLI failed after {retries} retries")
+
+
+def _load_config_file() -> dict:
+    """Load planner/editor config from ~/.config/evorun/evorun.toml."""
+    config_path = os.path.expanduser("~/.config/evorun/evorun.toml")
+    if not os.path.exists(config_path):
+        return {}
+
+    try:
+        with open(config_path, "rb") as f:
+            return tomllib.load(f)
+    except Exception as e:
+        _run_logger.warning(f"Failed to load evorun config: {e}")
+        return {}
+
+
 # ────────────────────────────────────────────────────────────
 # EvoRunAgent
 # ────────────────────────────────────────────────────────────
@@ -587,9 +715,24 @@ class EvoRunAgent:
 
         self.fake_run = getattr(args, 'fake_run', False)
 
-        # LLM config from CLI args and environment variables.
+        # LLM config from CLI args, config file, and environment variables.
         self.model_name = getattr(args, 'model', None) or "claude-sonnet-4-6"
-        self.editor_model = getattr(args, 'editor_model', None) or self.model_name
+
+        # Load planner/editor config from ~/.config/evorun/evorun.toml
+        config = _load_config_file()
+        planner_cfg = config.get("planner", {})
+        editor_cfg = config.get("editor", {})
+
+        self.planner_model = planner_cfg.get("model") or self.model_name
+        self.editor_model = editor_cfg.get("model") or self.planner_model
+
+        self.planner_provider = planner_cfg.get("provider") or "anthropic"
+        self.editor_provider = editor_cfg.get("provider") or "anthropic"
+
+        self.planner_api_key = planner_cfg.get("api_key", None)
+        self.editor_api_key = editor_cfg.get("api_key", None)
+
+        self.editor_model_name = self.editor_model
 
         # Tree search max children
         self.tree_max_children = getattr(args, 'max_children', 10)
@@ -906,6 +1049,102 @@ class EvoRunAgent:
         needs_fix = len(review_notes) > 0
         return needs_fix, "\n".join(review_notes)
 
+    def _run_planner(self, feedback: str) -> str:
+        """Run the planner stage: analyze feedback and produce a free-form plan.
+
+        The planner reads the full feedback prompt and outputs a natural-language
+        plan describing WHAT files to modify and WHAT changes to make. It does NOT
+        write code.
+
+        Args:
+            feedback: The formatted feedback string from _format_feedback().
+
+        Returns:
+            Free-form text plan or empty string if planning fails.
+        """
+        planner_env = _build_claude_env(self.planner_provider, self.planner_model, self.planner_api_key)
+        planner_prompt = f"""\
+You are a code planning architect. Your job is to analyze evaluation results
+and code review feedback, then produce a plan for what changes to make.
+
+IMPORTANT RULES:
+1. Do NOT write any code. Do NOT use Read, Edit, or Write tools.
+2. Do NOT produce diffs or file content.
+3. Describe changes in plain language — the editor will implement them.
+
+Here is the feedback to analyze:
+{feedback}
+
+Produce a concise plan describing what to change and why.
+"""
+
+        try:
+            result = _run_claude_cli_with_env(
+                prompt=planner_prompt,
+                cwd=str(self.codebase.codebase_dir),
+                model=self.planner_model,
+                env_overrides=planner_env,
+                max_turns=30,
+                allowed_tools=[],
+                retries=getattr(self, 'llm_retries', 3),
+                retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
+            )
+            return result.strip()
+        except Exception as e:
+            _run_logger.warning(f"Planner failed (iter {self._iteration}): {e}")
+            return ""
+
+    def _run_editor(self, plan: str, feedback: str) -> str:
+        """Run the editor stage: execute the plan by writing actual code.
+
+        The editor receives the plan from the planner, reads the relevant files
+        as needed, and makes code changes via Read/Edit/Write.
+
+        Args:
+            plan: The free-form plan text from _run_planner().
+            feedback: The full feedback for context (scores, eval output, etc.).
+
+        Returns:
+            The raw claude CLI output (tool use logs).
+        """
+        editor_env = _build_claude_env(self.editor_provider, self.editor_model, self.editor_api_key)
+        editor_prompt = f"""\
+You are a senior Python developer implementing a code improvement plan.
+
+## Your Plan
+{plan}
+
+## Context (from evaluation)
+{feedback}
+
+## Instructions
+1. Read the files mentioned in the plan to understand the current code.
+2. Implement each change described in the plan faithfully.
+3. Make sure your changes produce valid, runnable Python code.
+4. Preserve working code that is not mentioned in the plan.
+5. Output complete files, not partial diffs.
+6. Do NOT make changes beyond what the plan specifies.
+7. Do not suggest EDA.
+8. Focus on improving the evaluation score.
+"""
+
+        try:
+            result = _run_claude_cli_with_env(
+                prompt=editor_prompt,
+                cwd=str(self.codebase.codebase_dir),
+                model=self.editor_model,
+                env_overrides=editor_env,
+                max_turns=500,
+                allowed_tools=['Read', 'Edit', 'Write'],
+                log_file=str(self.codebase.codebase_dir / ".evorun_claude.log"),
+                retries=getattr(self, 'llm_retries', 3),
+                retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
+            )
+            return result
+        except Exception as e:
+            _run_logger.warning(f"Editor failed (iter {self._iteration}): {e}")
+            return ""
+
     # ─── Main entry point ────────────────────────────────────────
 
     def run(self) -> None:
@@ -1207,30 +1446,27 @@ class EvoRunAgent:
         feedback = self._format_feedback(result, self._iteration, tree_info, prev_eval, code_review_notes, debug_instructions, parent_score)
 
         if not (used_fusion and log_content) and not self.fake_run:
-            # Normal Claude CLI expansion
+            # Two-stage: planner → editor
             if feedback:
-                _run_logger.info(f"[Iter {self._iteration}] Sending feedback to Claude...")
+                _run_logger.info(f"[Iter {self._iteration}] Sending feedback to planner...")
                 prev_hashes = self._compute_file_hashes(
                     self.codebase.get_experiment_files(),
                 )
 
-                claude_log_path = str(self.codebase.codebase_dir / ".evorun_claude.log")
-                try:
-                    log_content = _run_claude_cli(
-                        feedback,
-                        cwd=str(self.codebase.codebase_dir),
-                        model=self.editor_model_name,
-                        max_turns=500,
-                        allowed_tools=['Read', 'Edit', 'Write'],
-                        log_file=claude_log_path,
-                    )
+                plan = self._run_planner(feedback)
+                if plan and plan.strip():
+                    _run_logger.info(f"[Iter {self._iteration}] Running editor with plan...")
+                    log_content = self._run_editor(plan, feedback)
                     if log_content:
                         _run_logger.info(
-                            f"[Claude] Output from log: {len(log_content)} chars"
+                            f"[Claude] Editor output: {len(log_content)} chars"
                         )
-                except Exception as e:
-                    _run_logger.error(f"[Iter {self._iteration}] Claude CLI failed: {e}")
+                else:
+                    _run_logger.warning(
+                        f"[Iter {self._iteration}] Planner produced empty plan — skipping code gen"
+                    )
                     log_content = ""
+            # If feedback is empty, log_content stays empty (no LLM call)
 
             # Detect actual file changes (hashes only).
             current_hashes = self._compute_file_hashes(
@@ -1934,10 +2170,12 @@ class EvoRunAgent:
                     f"Do NOT include code snippets. Keep it under {MAX_EDIT_SUMMARY_CHARS} characters.\n\n"
                     f"Diff:\n{diff_text}\n\nSummary:"
                 )
-                summary = _run_claude_cli(
+                editor_env = _build_claude_env(self.editor_provider, self.editor_model, self.editor_api_key)
+                summary = _run_claude_cli_with_env(
                     prompt,
                     cwd=str(self.codebase.codebase_dir),
-                    model=self.editor_model_name,
+                    model=self.editor_model,
+                    env_overrides=editor_env,
                     max_turns=10,
                 )
                 return summary.strip()
@@ -2241,33 +2479,10 @@ class EvoRunAgent:
         # Build codebase context
         codebase_prompt = self.codebase.get_codebase_prompt(max_size=4000)
 
-        # Build fusion prompt
-        prompt = f"""### Cross-Branch Fusion
-
-You are a Kaggle grandmaster attending a competition. Your current solution
-is being improved by selectively incorporating techniques from successful
-reference solutions from different approaches.
-
-## Your Current Solution
-{codebase_prompt}
-
-{''.join(reference_sections)}
-
-### Instructions
-1. Analyze the reference solution(s) and identify their key strengths
-2. Selectively adopt ONE or TWO techniques that address YOUR specific limitations
-3. Preserve what is working in your current solution
-4. Do NOT blindly combine everything — choose the most relevant technique(s)
-5. Output complete runnable Python files, not just diffs
-6. Do not suggest EDA
-
-Focus on quality over quantity: one well-integrated technique is better than
-a messy combination of several.
-"""
         _run_logger.info(f"[Fusion] Running fusion for node {target_node.id[:8]} "
                         f"with {len(candidates)} reference(s)")
 
-       # Run Claude CLI
+        # Two-stage fusion: planner → editor
         modified_files: list[str] = []
         added_files: list[str] = []
         deleted_files: list[str] = []
@@ -2275,19 +2490,87 @@ a messy combination of several.
 
         prev_hashes = self._compute_file_hashes(self.codebase.get_experiment_files())
 
-        claude_log_path = str(self.codebase.codebase_dir / ".evorun_claude.log")
+        # Fusion planner
+        fusion_feedback = f"""\
+### Cross-Branch Fusion Context
+
+You are a code planning architect for cross-branch fusion. Analyze the
+reference solutions below and plan how to selectively incorporate useful
+techniques into the current codebase.
+
+IMPORTANT RULES:
+1. Do NOT write any code. Do NOT use Read, Edit, or Write tools.
+2. Describe changes in plain language — the editor will implement them.
+
+## Current Codebase
+{codebase_prompt}
+
+## Reference Solutions
+{''.join(reference_sections)}
+
+Produce a concise plan describing what techniques to incorporate and how.
+"""
+        fusion_plan = ""
         try:
-            log_content = _run_claude_cli(
-                prompt,
+            fusion_planner_env = _build_claude_env(self.planner_provider, self.planner_model, self.planner_api_key)
+            fusion_plan = _run_claude_cli_with_env(
+                prompt=fusion_feedback,
                 cwd=str(self.codebase.codebase_dir),
-                model=self.editor_model_name,
-                max_turns=500,
-                allowed_tools=['Read', 'Edit', 'Write'],
-                log_file=claude_log_path,
-            )
+                model=self.planner_model,
+                env_overrides=fusion_planner_env,
+                max_turns=30,
+                allowed_tools=[],
+                retries=2,
+                retry_base_delay=3.0,
+            ).strip()
         except Exception as e:
-            _run_logger.error(f"[Fusion] Claude CLI failed: {e}")
-            log_content = ""
+            _run_logger.warning(f"[Fusion] Planner failed: {e}")
+            fusion_plan = ""
+
+        if fusion_plan and fusion_plan.strip():
+            # Fusion editor
+            fusion_editor_env = _build_claude_env(self.editor_provider, self.editor_model, self.editor_api_key)
+            fusion_editor_prompt = f"""\
+You are implementing a cross-branch fusion plan.
+
+## Fusion Plan
+{fusion_plan}
+
+## Current Codebase
+{codebase_prompt}
+
+## Reference Solutions (for context while reading)
+{''.join(reference_sections)}
+
+## Instructions
+1. Read the current files to understand the codebase.
+2. Implement the fusion plan: selectively adopt techniques from the
+   reference solutions that fit your current architecture.
+3. Preserve what is working in your current solution.
+4. Do NOT blindly combine everything — choose the most relevant technique(s).
+5. Output complete runnable Python files, not just diffs.
+6. Do not suggest EDA.
+
+Focus on quality over quantity: one well-integrated technique is better than
+a messy combination of several.
+"""
+            try:
+                log_content = _run_claude_cli_with_env(
+                    prompt=fusion_editor_prompt,
+                    cwd=str(self.codebase.codebase_dir),
+                    model=self.editor_model,
+                    env_overrides=fusion_editor_env,
+                    max_turns=500,
+                    allowed_tools=['Read', 'Edit', 'Write'],
+                    log_file=str(self.codebase.codebase_dir / ".evorun_claude.log"),
+                    retries=2,
+                    retry_base_delay=3.0,
+                )
+            except Exception as e:
+                _run_logger.error(f"[Fusion] Editor CLI failed: {e}")
+                log_content = ""
+        else:
+            _run_logger.warning("[Fusion] Planner produced empty plan — skipping fusion")
 
         # Detect file changes
         current_hashes = self._compute_file_hashes(self.codebase.get_experiment_files())
