@@ -103,7 +103,7 @@ class TreeSearch:
     def _normalize_reward(self, raw_score: float | None, visits: int = 0) -> float:
         """Convert raw score to normalized reward using percentile rank.
 
-        - None / NaN (broken/unparseable) -> 0.3 (exploration bonus — code may be worth debugging, if parent visited < 2)
+        - None / NaN (broken/unparseable) -> 0.0 (exploration bonus applied in UCT)
         - First score   -> 0.5  (neutral, no history to rank against)
         - Subsequent scores -> percentile rank in [0, 1]:
             maximize=True:  higher raw score -> higher rank -> higher reward
@@ -113,7 +113,7 @@ class TreeSearch:
         rewards in a predictable [0, 1] range for stable UCT computation.
         """
         if raw_score is None or math.isnan(raw_score):
-            return 0.3 if visits < 2 else 0.0  # exploration bonus only on first expansion
+            return 0.7 if visits < 2 else 0.0  # exploration bonus only on first expansion
         # Prevent duplicate scores from corrupting the sorted list.
         # A duplicate (e.g., from a rejected duplicate child) would cause
         # list.remove() in the undo path to delete the wrong entry.
@@ -216,19 +216,10 @@ class TreeSearch:
         if node.visits > 0:
             exploration = min(exploration, self.explore_c * 0.8)
 
-        # Small bonus for broken nodes during first 2 visits.
-        # When a node has been expanded before (visits >= 1) but has metric.value
-        # is None (eval completely failed), give it a tiny exploration nudge for
-        # the first 2 visits so it gets 1-2 retries for debugging, then drops to
-        # normal scoring so working nodes are strongly preferred.
-        if node.visits <= 1 and node.metric is not None and node.metric.value is None:
-            exploration += self.explore_c * 0.3
-
-        # Small bonus for unvisited nodes with no metric — gives them a
-        # chance to be tried without overwhelming score ranking for
-        # normal score-based exploration.
-        if node.visits == 0 and (not node.metric or node.metric.value is None):
-            exploration += self.explore_c * 0.5
+        # Broken node bonus — decays with visits so the node gets tried
+        # early but doesn't dominate long-term selection.
+        if not node.metric or (node.metric is not None and node.metric.value is None):
+            exploration += self.explore_c * 2.0 / max(node.visits, 1)
 
         uct: float = mean_reward + exploration
 
