@@ -100,10 +100,10 @@ class TreeSearch:
     # Scoring normalization
     # ------------------------------------------------------------------
 
-    def _normalize_reward(self, raw_score: float | None, visits: int = 0) -> float:
+    def _normalize_reward(self, raw_score: float | None) -> float:
         """Convert raw score to normalized reward using percentile rank.
 
-        - None / NaN (broken/unparseable) -> 0.0 (exploration bonus applied in UCT)
+        - None / NaN (broken/unparseable) -> 0.0 (exploration bonus applied in _score_candidate)
         - First score   -> 0.5  (neutral, no history to rank against)
         - Subsequent scores -> percentile rank in [0, 1]:
             maximize=True:  higher raw score -> higher rank -> higher reward
@@ -113,7 +113,7 @@ class TreeSearch:
         rewards in a predictable [0, 1] range for stable UCT computation.
         """
         if raw_score is None or math.isnan(raw_score):
-            return 0.7 if visits < 2 else 0.0  # exploration bonus only on first expansion
+            return 0.0
         # Prevent duplicate scores from corrupting the sorted list.
         # A duplicate (e.g., from a rejected duplicate child) would cause
         # list.remove() in the undo path to delete the wrong entry.
@@ -164,7 +164,7 @@ class TreeSearch:
             # No node can expand more -- pick highest-Q node overall.
             return max(
                 self.journal.nodes,
-                key=lambda n: n.total_reward / max(n.visits, 1),
+                key=lambda n: n.total_reward / max(n.num_children, 1),
             )
 
         # Score each candidate.
@@ -176,14 +176,14 @@ class TreeSearch:
         scored_candidates.sort(key=lambda x: x[0], reverse=True)
         _best_score, best_node = scored_candidates[0]
 
-        is_first_visit = best_node.visits == 0
-        node_label = "unvisited" if is_first_visit else "visited"
+        is_first_expansion = best_node.num_children == 0
+        node_label = "unvisited" if is_first_expansion else "visited"
         raw = best_node.metric.value if best_node.metric and best_node.metric.value is not None else "N/A"
         logger.info(
             f"[Tree] Selected node {best_node.id[:8]} ({node_label}, "
             f"UCT={_best_score:.4f}, raw={raw}, "
-            f"Q={best_node.total_reward / max(best_node.visits, 1):.4f}, "
-            f"visits={best_node.visits}, depth={self._node_depth(best_node)})"
+            f"Q={best_node.total_reward / max(best_node.num_children, 1):.4f}, "
+            f"children={best_node.num_children}, depth={self._node_depth(best_node)})"
         )
 
         # Assign branch_id for nodes that don't have one yet (unvisited first expansions).
@@ -200,26 +200,26 @@ class TreeSearch:
         All nodes are scored the same way: mean reward + depth-weighted
         exploration bonus, with sparsity bonus for under-explored branches.
         """
-        mean_reward: float = node.total_reward / max(node.visits, 1)
+        mean_reward: float = node.total_reward / max(node.num_children, 1)
 
         # Standard UCT exploration, depth-weighted.
         depth_of_node: int = self._node_depth(node)
         # Shallow nodes get more exploration: root-child=1.8, depth2=1.3, depth3+=0.8
         depth_weight = max(2.3 - 0.3 * depth_of_node, 0.5)
-        parent_visits: int = node.parent.visits if node.parent else 1
+        parent_children: int = node.parent.num_children if node.parent else 1
         exploration: float = self.explore_c * math.sqrt(
-            math.log(max(parent_visits, 1) + 1) / max(node.visits, 1)
+            math.log(max(parent_children, 1) + 1) / max(node.num_children, 1)
         ) * depth_weight
 
-        # For unvisited nodes (visits == 0), let natural UCT exploration
-        # work without a hard cap so they always get tried at least once.
-        if node.visits > 0:
+        # For expanded nodes (num_children > 0), cap exploration to avoid
+        # over-exploration once a node has been tried at least once.
+        if node.num_children > 0:
             exploration = min(exploration, self.explore_c * 0.8)
 
-        # Broken node bonus — decays with visits so the node gets tried
+        # Broken node bonus — decays with num_children so the node gets tried
         # early but doesn't dominate long-term selection.
         if not node.metric or (node.metric is not None and node.metric.value is None):
-            exploration += self.explore_c * 2.0 / max(node.visits, 1)
+            exploration += self.explore_c * 2.0 / max(node.num_children, 1)
 
         uct: float = mean_reward + exploration
 
@@ -308,7 +308,7 @@ class TreeSearch:
         child.metric = MetricValue(value=score, maximize=self.maximize)
 
         # Compute normalized reward.
-        reward: float = self._normalize_reward(score, parent.visits)
+        reward: float = self._normalize_reward(score)
         child._reward = reward
 
         # Book-keeping.
@@ -483,9 +483,10 @@ class TreeSearch:
         self.explore_c = data.get("explore_c", self.explore_c)
 
         # Restore root.
+        root_data = next((nd for nd in data["nodes"] if nd["id"] == data["root_id"]), None)
         self.root.id = data["root_id"]
-        self.root.visits = 0
-        self.root.total_reward = 0.0
+        self.root.visits = root_data["visits"] if root_data else 0
+        self.root.total_reward = root_data["total_reward"] if root_data else 0.0
         self.journal.append(self.root)
 
         # Restore rewards stats.

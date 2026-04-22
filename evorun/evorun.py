@@ -1353,16 +1353,16 @@ Do not try to improve the score — just fix the errors.
         # ---- Step 0: Select node to expand (UCT across entire tree) ----
         target_branch_id = len(self.tree.root.children) + 1
         target_node = self.tree.select_node(branch_id=target_branch_id)
-        # avg_reward = current UCT exploration value (visits==1 → inf).
+        # avg_reward = current UCT score (num_children==0 → inf).
         avg_reward = (
-            target_node.total_reward / max(target_node.visits, 1)
-            if target_node.visits else float("inf")
+            target_node.total_reward / max(target_node.num_children, 1)
+            if target_node.num_children else float("inf")
         )
         _run_logger.info(
             f"[Iter {self._iteration + 1}/{self.max_iters}] "
             f"Tree search: selected node {target_node.id[:8]} "
-            f"(Q={avg_reward:.4f}, visits={target_node.visits}, "
-            f"children={target_node.num_children}, depth={self._node_depth(target_node)})"
+            f"(Q={avg_reward:.4f}, children={target_node.num_children}, "
+            f"depth={self._node_depth(target_node)})"
         )
 
         # Update decay exploration constant
@@ -2531,7 +2531,7 @@ Do not try to improve the score — just fix the errors.
         reference_sections = []
         for i, ref_node in enumerate(candidates):
             ref_score = ref_node.metric.value if ref_node.metric else "N/A"
-            ref_q = ref_node.total_reward / max(ref_node.visits, 1)
+            ref_q = ref_node.total_reward / max(ref_node.num_children, 1)
             diff_str = self._compute_code_diff(
                 target_node.code, ref_node.code,
                 fromfile="target", tofile=f"ref_{i + 1}",
