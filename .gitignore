@@ -69,6 +69,8 @@ logs/
 *.pid
 *.out
 
+# ==== Claude stuff ====
+.claude
 
 # ===== Treevee Runtime (examples) =====
 .treevee/
