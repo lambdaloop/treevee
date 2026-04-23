@@ -3,6 +3,7 @@ const rootDiffCache = {};
 const stageColors = {
   root: '#f7c2e0',
   improve: '#d4b0e8',
+  fusion: '#b5e9cd',
   debug: '#f7d0c7',
   draft: '#c2d8f2',
 };
@@ -12,6 +13,7 @@ const defaultColor = '#d4b0e8';
 const stageEmojis = {
   root: '\uD83C\uDF38',
   improve: '\u2728',
+  fusion: '\uD83E\uDDEC',
   debug: '\uD83D\uDCAC',
   draft: '\uD83C\uDF1F',
 };
@@ -418,27 +420,6 @@ function showNodeDetailToBottom(nodeData) {
 
   }
 
-  // Diff (with vs-parent / vs-root toggle)
-  html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;">';
-  html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
-  html += '<h4 style="color:var(--accent-lavender);font-size:13px;margin:0;">Code Diff</h4>';
-  if (!isRoot) {
-    const btnBase = 'border:1px solid var(--border-color);border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;';
-    html += `<button id="diff-toggle-parent" class="active" style="${btnBase}background:var(--accent-lavender);color:var(--bg-primary);">vs parent</button>`;
-    html += `<button id="diff-toggle-root" class="inactive" style="${btnBase}background:var(--bg-tertiary);color:var(--accent-lavender);">vs root</button>`;
-  }
-  html += '</div>';
-  html += '<div id="diff-content">';
-  if (historyEntry?.diff_text && historyEntry.diff_text.trim()) {
-    html += renderDiffHTML(historyEntry.diff_text);
-  } else if (isRoot) {
-    html += '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">This is the root node.</p>';
-  } else {
-    html += '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">No diff available (no history entry for this step).</p>';
-  }
-  html += '</div>';
-  html += '</div>';
-
   // Eval output / Error output
   const hasEvalOutput = nodeData.eval_output && nodeData.eval_output.trim();
   const hasHistoryEntry = !!historyEntry;
@@ -480,6 +461,27 @@ function showNodeDetailToBottom(nodeData) {
     }
     html += '</div>';
   }
+
+  // Diff (with vs-parent / vs-root toggle)
+  html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;">';
+  html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
+  html += '<h4 style="color:var(--accent-lavender);font-size:13px;margin:0;">Code Diff</h4>';
+  if (!isRoot) {
+    const btnBase = 'border:1px solid var(--border-color);border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;';
+    html += `<button id="diff-toggle-parent" class="active" style="${btnBase}background:var(--accent-lavender);color:var(--bg-primary);">vs parent</button>`;
+    html += `<button id="diff-toggle-root" class="inactive" style="${btnBase}background:var(--bg-tertiary);color:var(--accent-lavender);">vs root</button>`;
+  }
+  html += '</div>';
+  html += '<div id="diff-content">';
+  if (historyEntry?.diff_text && historyEntry.diff_text.trim()) {
+    html += renderDiffHTML(historyEntry.diff_text);
+  } else if (isRoot) {
+    html += '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">This is the root node.</p>';
+  } else {
+    html += '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">No diff available (no history entry for this step).</p>';
+  }
+  html += '</div>';
+  html += '</div>';
 
   if (historyEntry) {
     // Planner input

@@ -354,7 +354,7 @@ section h2::after {
   padding: 20px;
   box-shadow: var(--shadow-sm);
   position: relative;
-  overflow: hidden;
+  overflow: visible;
 }
 
 #chart-section::after {

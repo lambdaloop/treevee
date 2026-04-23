@@ -160,6 +160,85 @@ const StateLoader = (() => {
   }
 
   /**
+   * Build the path from root to the best node by walking parent_id chain.
+   * Returns entries sorted root → best, with score delta from parent.
+   * Each entry has: iter, score, editSummary, datetime, delta, isRoot.
+   */
+  function getProgressionPath() {
+    const bestId = getBestNodeId();
+    if (!bestId) return [];
+
+    const nodes = getNodes();
+    const nodeMap = new Map();
+    for (const n of nodes) {
+      nodeMap.set(n.id, n);
+    }
+
+    const history = getHistory();
+    const historyMap = new Map();
+    for (const h of history) {
+      historyMap.set(h.iter, h);
+    }
+
+    // Walk parent chain from best node back to root.
+    const path = [];
+    let current = nodeMap.get(bestId);
+    while (current) {
+      path.push(current);
+      current = nodeMap.get(current.parent_id);
+    }
+    // Reverse so root → best.
+    path.reverse();
+
+    const maximize = getMaximize();
+    const entries = [];
+    let prevScore = null;
+    for (const node of path) {
+      const step = node.step;
+      const histEntry = historyMap.get(step) ?? null;
+      const score = node.score;
+      const delta = (score !== null && prevScore !== null) ? score - prevScore : null;
+      const isImprovement = (score !== null && prevScore !== null && (maximize ? score > prevScore : score < prevScore));
+      entries.push({
+        iter: step,
+        score,
+        editSummary: histEntry?.edit_summary ?? null,
+        datetime: histEntry?.datetime ?? null,
+        delta,
+        isImprovement,
+        isRoot: node.stage === 'root',
+        nodeId: node.id,
+      });
+      if (score !== null) prevScore = score;
+    }
+    return entries;
+  }
+
+  /**
+   * Build the improvement sequence from root to best node.
+   * Root is plotted at iter=-1, improvement nodes at their iteration.
+   * Each entry has: iter, score, editSummary, datetime, delta, isRoot.
+   */
+  function getProgressionImprovements() {
+    const path = getProgressionPath();
+    const entries = [];
+    for (const p of path) {
+      if (p.isRoot || (p.isImprovement && p.score !== null)) {
+        entries.push({
+          iter: p.isRoot ? -1 : p.iter,
+          score: p.score,
+          editSummary: p.editSummary,
+          datetime: p.datetime,
+          delta: p.delta,
+          isRoot: p.isRoot,
+          nodeId: p.nodeId,
+        });
+      }
+    }
+    return entries;
+  }
+
+  /**
    * Build running-best-score progression over iterations.
    * Uses node scores as the authoritative data source, joined to history
    * by step number to get edit summaries.
@@ -198,6 +277,6 @@ const StateLoader = (() => {
     load, loadFromData, getState, getHistory, getTreeStructure, getNodes,
     getBestScore, getBestSnapshotIteration, getMaximize, getAllScores,
     getBestNodeId, getBestIteration, getScoreReason, getHistoryEntryForStep,
-    getNodesByStep, isBestNode, getBestProgression,
+    getNodesByStep, isBestNode, getBestProgression, getProgressionPath, getProgressionImprovements,
   };
 })();
