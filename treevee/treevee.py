@@ -665,6 +665,7 @@ class EvoRunAgent:
 
         self.fake_run = getattr(args, 'fake_run', False)
         self.print_claude_output = getattr(args, 'print_claude_output', False)
+        self.enable_web_search = not getattr(args, 'disable_web_search', False)
 
         # LLM config from ~/.config/treevee/treevee.toml.
         # Falls back to hardcoded defaults if the config file is missing a value.
@@ -1031,6 +1032,12 @@ class EvoRunAgent:
             (planner_input_prompt, plan_text) — full prompt sent and output received.
         """
         planner_env = _build_claude_env(self.planner_provider, self.planner_model, self.planner_api_key)
+        web_search_instruction = (
+            "5. You may use the WebSearch tool to look up relevant papers, techniques, "
+            "or benchmarks before planning."
+            if self.enable_web_search
+            else ""
+        )
         planner_prompt = f"""\
 You are a code planning architect. Your job is to analyze evaluation results
 and produce a plan for what changes to make.
@@ -1040,6 +1047,7 @@ IMPORTANT RULES:
 2. Do NOT produce diffs or file content.
 3. Describe changes in plain language — the editor will implement them.
 4. Use the Read tool to inspect the specific files relevant to your plan.
+{web_search_instruction}
 
 ## Required Analysis Framework
 
@@ -1075,7 +1083,7 @@ Produce a concise plan following this structure.
                 model=self.planner_model,
                 env_overrides=planner_env,
                 max_turns=30,
-                allowed_tools=['Read'],
+                allowed_tools=['Read', 'WebSearch'] if self.enable_web_search else ['Read'],
                 log_file=str(self.codebase.codebase_dir / ".treevee/planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
@@ -3654,6 +3662,11 @@ def _add_run_args(subparser: argparse.ArgumentParser) -> None:
         "--print-claude-output",
         action="store_true",
         help="Print Claude CLI output (planner/editor) in real-time for debugging",
+    )
+    subparser.add_argument(
+        "--disable-web-search",
+        action="store_true",
+        help="Disable web search for the planner (web search is enabled by default)",
     )
 
 
