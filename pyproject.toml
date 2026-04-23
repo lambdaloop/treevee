@@ -1,5 +1,5 @@
 [project]
-name = "evorun"
+name = "treevee"
 version = "0.1.0"
 description = "LLM-driven iterative codebase optimization with Monte Carlo Tree Search"
 requires-python = ">=3.10"
@@ -15,7 +15,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
-evorun = "evorun:main"
+treevee = "treevee:main"
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
@@ -24,7 +24,7 @@ platforms = ["linux-64"]
 [tool.pixi.dependencies]
 
 [tool.hatch.build]
-include = ["evorun"]
+include = ["treevee"]
 
 [tool.pixi.pypi-dependencies]
-evorun = { path = ".", editable = true }
+treevee = { path = ".", editable = true }

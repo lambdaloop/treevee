@@ -22,10 +22,10 @@ import logging
 import math
 from typing import Optional
 
-from evorun.engine.search_node import Journal, SearchNode
-from evorun.utils.metric import MetricValue
+from treevee.engine.search_node import Journal, SearchNode
+from treevee.utils.metric import MetricValue
 
-logger = logging.getLogger("evorun")
+logger = logging.getLogger("treevee")
 
 # Maximum number of child expansions per non-root node before it's
 # considered "fully expanded" (for stopping the search on that branch).

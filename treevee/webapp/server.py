@@ -4,7 +4,7 @@
 Usage:
     python server.py [folder] [--port PORT]
 
-If folder is provided, auto-loads .evorun_state.json from it.
+If folder is provided, auto-loads .treevee_state.json from it.
 Otherwise, shows file upload UI.
 """
 
@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 
-STATE_FILE = ".evorun_state.json"
+STATE_FILE = ".treevee_state.json"
 DEFAULT_PORT = 9000
 HOST = "localhost"
 
@@ -32,7 +32,7 @@ def parse_server_args():
     )
     parser.add_argument(
         "folder", nargs="?", default=None,
-        help="Directory containing .evorun_state.json to auto-load",
+        help="Directory containing .treevee_state.json to auto-load",
     )
     parser.add_argument(
         "--port", "-p", type=int, default=DEFAULT_PORT,
@@ -119,7 +119,7 @@ class EvorunHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json(404, {"error": f"Node {node_id} not found in state"})
             return
 
-        snaps_dir = os.path.join(self.state_folder, ".evorun_snapshots")
+        snaps_dir = os.path.join(self.state_folder, ".treevee_snapshots")
 
         def find_snap(node):
             named = os.path.join(snaps_dir, f"iter_snapshot_{node['id'][:8]}")
@@ -205,7 +205,7 @@ def start_server(folder=None, port=DEFAULT_PORT, host=HOST, open_browser=True):
     """Start the visualizer server, optionally blocking until interrupted.
 
     Args:
-        folder: Directory containing .evorun_state.json to auto-load.
+        folder: Directory containing .treevee_state.json to auto-load.
         port: Port to listen on.
         host: Host to bind to.
         open_browser: Whether to open a browser tab on startup.
@@ -225,7 +225,7 @@ def start_server(folder=None, port=DEFAULT_PORT, host=HOST, open_browser=True):
         print(f"Loading: {os.path.join(folder, STATE_FILE)}")
     else:
         print(f"Evorun Visualizer -> {host}:{port}")
-        print("Drop a .evorun_state.json file or click Load")
+        print("Drop a .treevee_state.json file or click Load")
 
     if open_browser:
         url = f"http://{host}:{port}"

@@ -98,9 +98,9 @@ simple_run_plan.md
 .simple_run_state.json
 experiment.bak
 
-# ===== EvoRun Runtime (examples) =====
-.evorun_aider.log
-.evorun_state.json
-.evorun_backup/
-.evorun_snapshots/
-.evorun_memory/
+# ===== Treevee Runtime (examples) =====
+.treevee_aider.log
+.treevee_state.json
+.treevee_backup/
+.treevee_snapshots/
+.treevee_memory/

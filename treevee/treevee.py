@@ -1,4 +1,4 @@
-"""evorun.py — LLM-driven iterative codebase optimization.
+"""treevee.py — LLM-driven iterative codebase optimization.
 
 A standalone Monte Carlo Tree Search (MCTS) optimizer that iteratively
 improves code using LLM feedback. Designed as a lightweight alternative
@@ -23,12 +23,12 @@ Stopping criteria (any condition stops the run):
     4.  Too many consecutive eval timeouts
 
 Usage:
-    python evorun.py ./codebase \\
+    python treevee.py ./codebase \\
         --max-iters 20 --patience 5 --reset
 
-LLM configuration (model, API key, base URL) is read from ~/.config/evorun/evorun.toml.
+LLM configuration (model, API key, base URL) is read from ~/.config/treevee/treevee.toml.
 For fake-run (no eval, no LLM, just random scores and tree exploration):
-    python evorun.py ./codebase \\
+    python treevee.py ./codebase \\
         --fake-run --reset --max-iters 10
 """
 
@@ -56,10 +56,10 @@ from typing import Any
 import hashlib
 import tomllib
 
-from evorun.tree_search import TreeSearch
-from evorun.utils.metric import MetricValue
+from treevee.tree_search import TreeSearch
+from treevee.utils.metric import MetricValue
 
-_run_logger = logging.getLogger("evorun")
+_run_logger = logging.getLogger("treevee")
 
 # ────────────────────────────────────────────────────────────
 # Configuration constants
@@ -318,12 +318,12 @@ class CodebaseManager:
     """Handles backup and restoration of the experiment directory.
 
     Backs up experiment/, TASK.md, eval.py, and pixi.toml by explicitly
-    copying each to .evorun_backup. Restores everything on demand.
+    copying each to .treevee_backup. Restores everything on demand.
     Snapshots additionally handle checkpointing at best scores.
 
     Directories Created:
-        .evorun_backup/        — experiment/ + TASK.md + eval.py + pixi.toml
-        .evorun_snapshots/     — per-node snapshots at best scores
+        .treevee_backup/        — experiment/ + TASK.md + eval.py + pixi.toml
+        .treevee_snapshots/     — per-node snapshots at best scores
 
     Args:
         codebase_dir: Path to the directory containing the codebase experiment.
@@ -338,7 +338,7 @@ class CodebaseManager:
             task_file: Name of the task spec file to load for LLM context.
         """
         self.codebase_dir = Path(codebase_dir).resolve()
-        self.backup_dir = self.codebase_dir / ".evorun_backup"
+        self.backup_dir = self.codebase_dir / ".treevee_backup"
         self._task_file: Path | None = None
         self._task_content: str | None = None
         self._task_filename = task_file
@@ -411,7 +411,7 @@ class CodebaseManager:
         if not improvements:
             _run_logger.warning("LLM returned no improvements")
             return []
-        import evorun.utils.response as _utils
+        import treevee.utils.response as _utils
         parsed: list[dict[str, str]] = _utils.extract_jsons(improvements)
         if not parsed:
             _run_logger.warning("No JSON found in LLM response")
@@ -539,7 +539,7 @@ def _run_claude_cli_with_env(
 
     logger = _run_logger
     if stage:
-        logger = logging.getLogger(f"evorun.{stage}")
+        logger = logging.getLogger(f"treevee.{stage}")
         if not logger.handlers:
             logger.setLevel(logging.INFO)
             fmt = logging.Formatter(
@@ -605,8 +605,8 @@ def _run_claude_cli_with_env(
 
 
 def _load_config_file() -> dict:
-    """Load planner/editor config from ~/.config/evorun/evorun.toml."""
-    config_path = os.path.expanduser("~/.config/evorun/evorun.toml")
+    """Load planner/editor config from ~/.config/treevee/treevee.toml."""
+    config_path = os.path.expanduser("~/.config/treevee/treevee.toml")
     if not os.path.exists(config_path):
         return {}
 
@@ -614,7 +614,7 @@ def _load_config_file() -> dict:
         with open(config_path, "rb") as f:
             return tomllib.load(f)
     except Exception as e:
-        _run_logger.warning(f"Failed to load evorun config: {e}")
+        _run_logger.warning(f"Failed to load treevee config: {e}")
         return {}
 
 
@@ -637,13 +637,13 @@ class EvoRunAgent:
         history: List of HistoryEntry records (one per iteration).
     """
 
-    _evorun_permissions: dict[str, list[str]] = {
+    _treevee_permissions: dict[str, list[str]] = {
         "allow": [
             "Edit(./experiment/**)",
         ],
         "deny": [
-            "Read(./.evorun*)",
-            "Edit(./.evorun*)",
+             "Read(./.treevee*)",
+             "Edit(./.treevee*)",
         ],
     }
 
@@ -666,7 +666,7 @@ class EvoRunAgent:
         self.fake_run = getattr(args, 'fake_run', False)
         self.print_claude_output = getattr(args, 'print_claude_output', False)
 
-        # LLM config from ~/.config/evorun/evorun.toml.
+        # LLM config from ~/.config/treevee/treevee.toml.
         # Falls back to hardcoded defaults if the config file is missing a value.
         _config = _load_config_file()
         planner_cfg = _config.get("planner", {})
@@ -709,7 +709,7 @@ class EvoRunAgent:
         self._parent_stagnation: dict[str, int] = {}
 
         # State and resume
-        self.state_path = self.codebase.codebase_dir / ".evorun_state.json"
+        self.state_path = self.codebase.codebase_dir / ".treevee_state.json"
         self._resumed = False
         self._history_start: int = 0
 
@@ -727,7 +727,7 @@ class EvoRunAgent:
         # Solution deduplication
         self._seen_code_hashes: set[str] = set()
 
-        # Ensure .claude/settings.local.json blocks reads of .evorun* files
+        # Ensure .claude/settings.local.json blocks reads of .treevee* files
         self._ensure_claude_settings()
 
         # Start the wall-clock timer.
@@ -741,15 +741,15 @@ class EvoRunAgent:
         signal.signal(signal.SIGTERM, _signal_handler)
 
     def _ensure_claude_settings(self) -> None:
-        """Ensure .claude/settings.local.json enforces evorun sandbox rules.
+        """Ensure .claude/settings.local.json enforces treevee sandbox rules.
 
-        Merges evorun-specific permissions into any existing settings.local.json,
+        Merges treevee-specific permissions into any existing settings.local.json,
         preserving other settings (e.g. defaultMode, user-defined allow/deny rules).
         Idempotent — re-running produces identical output with no duplicates.
 
         Rules:
         - Allow Edit of experiment/ (auto-approve, sandbox LLM to one folder)
-        - Deny Read/Edit of .evorun* files (protect internal state, snapshots, logs)
+        - Deny Read/Edit of .treevee* files (protect internal state, snapshots, logs)
         - All other reads are unrestricted (normal Claude Code behavior)
         """
         settings_path = self.codebase.codebase_dir / ".claude" / "settings.local.json"
@@ -767,7 +767,7 @@ class EvoRunAgent:
             permissions = data.setdefault("permissions", {})
             for key in ("allow", "deny"):
                 existing = set(permissions.get(key, []))
-                existing.update(self._evorun_permissions.get(key, []))
+                existing.update(self._treevee_permissions.get(key, []))
                 permissions[key] = sorted(existing)
             settings_path.write_text(
                 json.dumps(data, indent=2),
@@ -1075,7 +1075,7 @@ Produce a concise plan following this structure.
                 env_overrides=planner_env,
                 max_turns=30,
                 allowed_tools=['Read'],
-                log_file=str(self.codebase.codebase_dir / ".evorun_planner_output"),
+                log_file=str(self.codebase.codebase_dir / ".treevee_planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="planner",
@@ -1129,7 +1129,7 @@ You are a senior Python developer implementing a code improvement plan.
                 env_overrides=editor_env,
                 max_turns=500,
                 allowed_tools=['Read', 'Edit', 'Write'],
-                log_file=str(self.codebase.codebase_dir / ".evorun_planner_output"),
+                log_file=str(self.codebase.codebase_dir / ".treevee_planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="editor",
@@ -1213,7 +1213,7 @@ Produce a concise fix plan following this structure.
                 env_overrides=planner_env,
                 max_turns=30,
                 allowed_tools=['Read'],
-                log_file=str(self.codebase.codebase_dir / ".evorun_planner_output"),
+                log_file=str(self.codebase.codebase_dir / ".treevee_planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="planner",
@@ -1292,7 +1292,7 @@ Do not try to improve the score — just fix the errors.
                 env_overrides=editor_env,
                 max_turns=500,
                 allowed_tools=['Read', 'Edit', 'Write'],
-                log_file=str(self.codebase.codebase_dir / ".evorun_planner_output"),
+                log_file=str(self.codebase.codebase_dir / ".treevee_planner_output"),
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="editor",
@@ -1688,7 +1688,7 @@ Do not try to improve the score — just fix the errors.
                 if self._consecutive_no_changes >= MAX_CONSECUTIVE_NO_CHANGES:
                     _run_logger.warning(
                         f"[Claude] No changes for {self._consecutive_no_changes} "
-                        f"consecutive iterations. Check .evorun_planner_output for debug info."
+                        f"consecutive iterations. Check .treevee_planner_output for debug info."
                     )
             # Store for next iteration's feedback.
             self._last_modified_files = modified_files
@@ -1888,9 +1888,9 @@ Do not try to improve the score — just fix the errors.
 
         # Rename pre-snapshot to child's actual snapshot name.
         if pre_snap_dir:
-            old_name = self.codebase.codebase_dir / ".evorun_snapshots" / pre_snap_dir
+            old_name = self.codebase.codebase_dir / ".treevee_snapshots" / pre_snap_dir
             new_name = (
-                self.codebase.codebase_dir / ".evorun_snapshots"
+                self.codebase.codebase_dir / ".treevee_snapshots"
                 / f"iter_snapshot_{child_node.id[:8]}"
             )
             if old_name.exists() and not new_name.exists():
@@ -2053,7 +2053,7 @@ Do not try to improve the score — just fix the errors.
     def save_state(self) -> None:
         """Save the current optimization state to disk.
 
-        Writes the following to .evorun_state.json:
+        Writes the following to .treevee_state.json:
             - next_iteration
             - best_score, best_snapshot_iteration
             - consecutive_timeouts
@@ -2128,7 +2128,7 @@ Do not try to improve the score — just fix the errors.
         else:
             target_name = f"iter_snapshot_{node.id[:8]}"
         snapshot_dir = (
-            self.codebase.codebase_dir / ".evorun_snapshots" / target_name
+            self.codebase.codebase_dir / ".treevee_snapshots" / target_name
         )
 
         # Collect files that exist in the parent snapshot (if any).
@@ -2197,7 +2197,7 @@ Do not try to improve the score — just fix the errors.
         Returns:
             Path string if found, None otherwise.
         """
-        snaps = self.codebase.codebase_dir / ".evorun_snapshots"
+        snaps = self.codebase.codebase_dir / ".treevee_snapshots"
         named = snaps / f"iter_snapshot_{node.id[:8]}"
         if named.exists():
             return str(named)
@@ -2379,7 +2379,7 @@ Do not try to improve the score — just fix the errors.
         if not snapshot_dir.exists():
             snapshot_dir = (
                 self.codebase.codebase_dir
-                / ".evorun_snapshots"
+                / ".treevee_snapshots"
                 / snapshot_name
             )
 
@@ -2391,7 +2391,7 @@ Do not try to improve the score — just fix the errors.
         try:
             resolved = snapshot_dir.resolve()
             allowed_base = (
-                self.codebase.codebase_dir / ".evorun_snapshots"
+                self.codebase.codebase_dir / ".treevee_snapshots"
             ).resolve()
             if not str(resolved).startswith(str(allowed_base)):
                 _run_logger.error(
@@ -2692,7 +2692,7 @@ Produce a concise fusion plan following this structure.
                 env_overrides=fusion_planner_env,
                 max_turns=30,
                 allowed_tools=['Read'],
-                log_file=str(self.codebase.codebase_dir / ".evorun_planner_output"),
+                log_file=str(self.codebase.codebase_dir / ".treevee_planner_output"),
                 retries=2,
                 retry_base_delay=3.0,
                 stage="planner",
@@ -2740,7 +2740,7 @@ a messy combination of several.
                     env_overrides=fusion_editor_env,
                     max_turns=500,
                     allowed_tools=['Read', 'Edit', 'Write'],
-                    log_file=str(self.codebase.codebase_dir / ".evorun_planner_output"),
+                    log_file=str(self.codebase.codebase_dir / ".treevee_planner_output"),
                     retries=2,
                     retry_base_delay=3.0,
                     stage="editor",
@@ -3189,7 +3189,7 @@ a messy combination of several.
         Returns:
             List of context lines for markdown formatting.
         """
-        import evorun.utils.response as _utils
+        import treevee.utils.response as _utils
         if not task_content:
             return []
 
@@ -3642,7 +3642,7 @@ def _add_run_args(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--server",
         action="store_true",
-        help="Start the web visualization server alongside the evorun run",
+        help="Start the web visualization server alongside the treevee run",
     )
     subparser.add_argument(
         "--port",
@@ -3708,7 +3708,7 @@ def parse_args() -> argparse.Namespace:
     # --- init subcommand ---
     init_parser = subparsers.add_parser(
         "init",
-        help="Initialize a new evorun project in the specified directory",
+        help="Initialize a new treevee project in the specified directory",
     )
     _add_init_args(init_parser)
 
@@ -3787,7 +3787,7 @@ def _validate_run_args(args: argparse.Namespace) -> None:
         )
 
     if not args.reset and codebase_dir.exists():
-        state_path = codebase_dir / ".evorun_state.json"
+        state_path = codebase_dir / ".treevee_state.json"
         if state_path.exists():
             _run_logger.info(f"Found state file: {state_path} — resuming.")
 
@@ -3813,8 +3813,8 @@ def _validate_viz_args(args: argparse.Namespace) -> None:
 
 
 def _setup_logging() -> None:
-    """Configure logging for evorun.py."""
-    log = logging.getLogger("evorun")
+    """Configure logging for treevee.py."""
+    log = logging.getLogger("treevee")
     if log.handlers:
         return  # Already configured
     log.setLevel(logging.INFO)
@@ -3849,15 +3849,15 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
     codebase_root = Path(args.path)
 
-    # --reset: delete all .evorun artifacts before starting.
+    # --reset: delete all .treevee artifacts before starting.
     if args.reset:
-        _evorun_artifacts = [
-            ".evorun_state.json",
-            ".evorun_backup",
-            ".evorun_snapshots",
-            ".evorun_planner_output",
+        _treevee_artifacts = [
+            ".treevee_state.json",
+            ".treevee_backup",
+            ".treevee_snapshots",
+            ".treevee_planner_output",
         ]
-        for name in _evorun_artifacts:
+        for name in _treevee_artifacts:
             p = codebase_root / name
             if p.exists():
                 if p.is_dir():
@@ -3925,7 +3925,7 @@ def _cmd_viz(args: argparse.Namespace) -> None:
 
 
 def _cmd_init(args: argparse.Namespace) -> None:
-    """Initialize a new evorun project in the specified directory."""
+    """Initialize a new treevee project in the specified directory."""
     init_dir = Path(args.path).resolve()
     init_dir.mkdir(parents=True, exist_ok=True)
 
@@ -3940,7 +3940,7 @@ def _cmd_init(args: argparse.Namespace) -> None:
     else:
         # Fallback: write a minimal config inline.
         config_dst.write_text(
-            "# evorun config.toml\n"
+            "# treevee config.toml\n"
             "llm_retries = 3\n"
             "llm_retry_base_delay = 3.0\n"
             "eval_cmd = \"pixi run python eval.py\"\n"
@@ -4005,7 +4005,7 @@ def _restore_snapshot(codebase_dir: Path, snapshot_name: str) -> None:
 
     # Resolve relative names against the codebase snapshots directory.
     if not snapshot_dir.exists():
-        snapshot_dir = codebase_dir / ".evorun_snapshots" / snapshot_name
+        snapshot_dir = codebase_dir / ".treevee_snapshots" / snapshot_name
 
     if not snapshot_dir.exists():
         _run_logger.info(f"[Restore] Snapshot not found: {snapshot_name}")
@@ -4014,7 +4014,7 @@ def _restore_snapshot(codebase_dir: Path, snapshot_name: str) -> None:
     # Security: reject any resolved path that escapes the snapshot dir.
     try:
         resolved = snapshot_dir.resolve()
-        allowed_base = (codebase_dir / ".evorun_snapshots").resolve()
+        allowed_base = (codebase_dir / ".treevee_snapshots").resolve()
         if not str(resolved).startswith(str(allowed_base)):
             _run_logger.error(f"[Restore] Snapshot path escapes codebase: {snapshot_name}")
             return
@@ -4054,7 +4054,7 @@ def _restore_snapshot(codebase_dir: Path, snapshot_name: str) -> None:
 def _cmd_restore(args: argparse.Namespace) -> None:
     """Restore the codebase from a saved snapshot."""
     codebase_dir = Path(args.path)
-    state_path = codebase_dir / ".evorun_state.json"
+    state_path = codebase_dir / ".treevee_state.json"
 
     if not state_path.exists():
         _run_logger.error(f"No state file found at: {state_path}")
@@ -4075,12 +4075,12 @@ def _cmd_restore(args: argparse.Namespace) -> None:
     def resolve_snapshot(node_id: str) -> str:
         """Return the best available snapshot name for a node ID."""
         named = f"iter_snapshot_{node_id[:8]}"
-        if (codebase_dir / ".evorun_snapshots" / named).exists():
+        if (codebase_dir / ".treevee_snapshots" / named).exists():
             return named
         node = nodes_by_id.get(node_id)
         if node is not None:
             pre = f"iter_snapshot_pre_{node['step']}"
-            if (codebase_dir / ".evorun_snapshots" / pre).exists():
+            if (codebase_dir / ".treevee_snapshots" / pre).exists():
                 return pre
         return named  # let _restore_snapshot emit the not-found message
 
@@ -4118,7 +4118,7 @@ def _cmd_restore(args: argparse.Namespace) -> None:
 def _cmd_history(args: argparse.Namespace) -> None:
     """Print iterations in chronological order with scores and edit summaries."""
     codebase_dir = Path(args.path)
-    state_path = codebase_dir / ".evorun_state.json"
+    state_path = codebase_dir / ".treevee_state.json"
 
     if not state_path.exists():
         _run_logger.error(f"No state file found at: {state_path}")
@@ -4161,7 +4161,7 @@ def _cmd_history(args: argparse.Namespace) -> None:
 def _cmd_tree(args: argparse.Namespace) -> None:
     """Print a tree summary of the run to stdout."""
     codebase_dir = Path(args.path)
-    state_path = codebase_dir / ".evorun_state.json"
+    state_path = codebase_dir / ".treevee_state.json"
 
     if not state_path.exists():
         _run_logger.error(f"No state file found at: {state_path}")
@@ -4214,7 +4214,7 @@ def _cmd_tree(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    """Entry point for evorun.
+    """Entry point for treevee.
 
     Dispatches to subcommand handlers: run, viz, init, restore, tree.
     """
@@ -4242,7 +4242,7 @@ def main() -> None:
         subparsers = parser.add_subparsers(dest="command")
         subparsers.add_parser("run", help="Run the optimization loop on a codebase")
         subparsers.add_parser("viz", help="Start the web visualization server (no optimizer)")
-        subparsers.add_parser("init", help="Initialize a new evorun project")
+        subparsers.add_parser("init", help="Initialize a new treevee project")
         parser.print_help()
         sys.exit(1)
 

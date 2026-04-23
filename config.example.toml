@@ -1,11 +1,11 @@
-# Example config.toml for evorun
+# Example config.toml for treevee
 # Copy this file to config.toml and adjust as needed.
 # CLI args take precedence over config.toml values, which take precedence
 # over the defaults listed here.
 #
 # Note: LLM model selection is NOT configured here. Use:
 #   --model CLI flag, or
-#   ~/.config/evorun/evorun.toml (planner/editor sections)
+#   ~/.config/treevee/treevee.toml (planner/editor sections)
 
 # ── LLM ──────────────────────────────────────────────────────────
 llm_retries = 3

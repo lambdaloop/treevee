@@ -1,7 +1,7 @@
 """SearchNode: solution tree node (code, execution, evaluation, search metadata).
 
 Stripped down from MLEvolve/engine/search_node.py — only attributes and
-methods used by evorun.py and tree_search.py are kept.
+methods used by treevee.py and tree_search.py are kept.
 """
 
 import logging
@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from dataclasses_json import DataClassJsonMixin
-from evorun.utils.metric import MetricValue
+from treevee.utils.metric import MetricValue
 
-logger = logging.getLogger("evorun")
+logger = logging.getLogger("treevee")
 
 
 @dataclass(eq=False)

@@ -1,5 +1,5 @@
-# Example ~/.config/evorun/evorun.toml
-# Copy to ~/.config/evorun/evorun.toml and adjust as needed.
+# Example ~/.config/treevee/treevee.toml
+# Copy to ~/.config/treevee/treevee.toml and adjust as needed.
 # This config controls the planner and editor LLM models/providers.
 #
 # api_key: omit or set to "unset" to use the env var.
