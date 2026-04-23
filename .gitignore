@@ -69,34 +69,6 @@ logs/
 *.pid
 *.out
 
-# ===== Project Specific =====
-cache/
-scripts/
-workspace/
-workspaces/
-test_workspace/
-runs/
-dataset/
-mle-bench/
-grading_servers/
-test/
-test.py
-run_scripts/*.json
-eval/grade/*/private/*
-evaluate/
-grading_server.output
-CODE_ANALYSIS_REPORT.md
-PROMPT_COMPARISON_REPORT.md
-
-# ===== MLEvolve Runtime =====
-.aider.tags.cache*/
-simple_run_plan.md
-
-# ===== SimpleRun Runtime (examples) =====
-.simple_run_backup/
-.simple_run_snapshots/
-.simple_run_state.json
-experiment.bak
 
 # ===== Treevee Runtime (examples) =====
 .treevee/
