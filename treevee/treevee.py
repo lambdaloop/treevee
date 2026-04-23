@@ -1040,35 +1040,33 @@ class EvoRunAgent:
         )
         planner_prompt = f"""\
 You are a code planning architect. Your job is to analyze evaluation results
-and produce a plan for what changes to make.
+and produce a focused plan for what changes to make.
 
 IMPORTANT RULES:
 1. Do NOT write any code. Do NOT use Edit or Write tools.
 2. Do NOT produce diffs or file content.
 3. Describe changes in plain language — the editor will implement them.
 4. Use the Read tool to inspect the specific files relevant to your plan.
+5. Include concrete details: if your plan references a specific algorithm,
+   formula, technique, or API, include the actual definition, parameters,
+   or pseudocode. The editor cannot look up or guess implementation details
+   from a name alone. Use the WebSearch tool to find precise formulas or
+   API documentation when needed.
 {web_search_instruction}
 
-## Required Analysis Framework
+## Plan Structure (keep it concise)
 
-Structure your plan using the following sections:
+**Diagnosis** (1 sentence): What is causing poor performance?
 
-**Root Cause Analysis** (2-3 sentences):
-- What specific aspect of the current code is causing poor performance?
-- What evidence from the eval output supports this diagnosis?
+**Proposed Changes** (1-3 changes max): For each change:
+- What: The specific modification
+- Why: Why this change addresses the problem
+- Where: Which file and function/section
+  (A completely different algorithm is fine if the current approach has hit
+   a ceiling — don't just tune parameters.)
 
-**Change Classification** — pick ONE:
-- **Tier 1: Optimization** — Keep model/architecture fixed. Only tune hyperparameters, learning rate schedules, random seeds, post-processing. Use when we are close to the target.
-- **Tier 2: Representation** — Change specific modules (swap backbone, change loss, add regularization, new features). Use when the current model underfits or overfits.
-- **Tier 3: Paradigm Shift** — Fundamentally change the approach (different algorithm family, ensemble, pseudo-labeling). Use when the current approach has hit a hard ceiling.
-
-**Proposed Changes** (list each):
-- What: The specific technical modification
-- Why: Why THIS task needs this change (not generic advice)
-
-**What Stays Unchanged:**
-- List key components that must remain identical for controlled comparison
-  (e.g., data split, random seed, core model architecture)
+You have limited turns — be direct and focused. Do not enumerate multiple
+alternatives or discuss trade-offs. Pick the single best approach and commit.
 
 Here is the feedback to analyze:
 {feedback}
@@ -2655,6 +2653,9 @@ IMPORTANT RULES:
 1. Do NOT write any code. Do NOT use Edit or Write tools.
 2. Describe changes in plain language — the editor will implement them.
 3. Use the Read tool to inspect current files if you need more context.
+4. Include concrete details: if a technique references a specific algorithm,
+   formula, or API, include the actual definition or parameters. The editor
+   cannot look up or guess implementation details from a name alone.
 
 {fusion_task_section}## Required Analysis
 
