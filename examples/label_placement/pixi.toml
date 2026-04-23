@@ -1,13 +1,12 @@
-[project]
-name = "label_placement"
+[workspace]
+name = "label-placement"
 version = "0.1.0"
+description = "Optimal label placement for line charts"
 channels = ["conda-forge"]
-platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
-
-[tasks]
-test = "python -c 'print(ok)'"
-run = "python eval.py"
+platforms = ["linux-64"]
 
 [dependencies]
-python = ">=3.9"
-numpy = ">=1.20"
+python = ">=3.10,<3.12"
+
+[tasks]
+eval = "python eval.py"
