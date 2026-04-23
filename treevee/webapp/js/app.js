@@ -14,21 +14,19 @@ function renderSummary() {
 
   document.getElementById('sum-nodes').textContent = nodes.length;
   document.getElementById('sum-depth').textContent = tree?.max_depth ?? '-';
-  document.getElementById('sum-maximize').textContent = maximize ? '\u2191 yes' : '\u2193 no';
+  document.getElementById('sum-maximize').textContent = maximize ? '↑ yes' : '↓ no';
 }
 
 function renderIterations() {
   const nodes = StateLoader.getNodesByStep();
-  const bestNodeId = StateLoader.getBestNodeId();
   const container = document.getElementById('iterations-list');
   container.innerHTML = '';
 
-  // Render in reverse order (newest first)
   const reversed = [...nodes].reverse();
 
   for (const node of reversed) {
     const item = document.createElement('div');
-    item.className = 'iteration-item';
+    item.className = 'iteration-item compact';
 
     const isBest = StateLoader.isBestNode(node.id);
     const scoreReason = StateLoader.getScoreReason(node);
@@ -40,12 +38,18 @@ function renderIterations() {
     if (isActualError) item.classList.add('timed-out');
     if (isRoot) item.classList.add('is-root');
 
-    const header = document.createElement('div');
-    header.className = 'iteration-header';
+    const row = document.createElement('div');
+    row.className = 'iteration-row';
+
+    const emoji = document.createElement('span');
+    emoji.className = 'iteration-emoji';
+    emoji.textContent = stageEmojis[node.stage] || '';
+    row.appendChild(emoji);
 
     const num = document.createElement('span');
     num.className = 'iteration-num';
-    num.textContent = isRoot ? '\uD83C\uDF38 Root' : `Step ${node.step}`;
+    num.textContent = isRoot ? 'Root' : `#${node.step}`;
+    row.appendChild(num);
 
     const score = document.createElement('span');
     score.className = 'iteration-score';
@@ -54,7 +58,6 @@ function renderIterations() {
       score.classList.add('no-change');
     } else {
       score.textContent = node.score.toFixed(4);
-      // Color based on improvement from parent
       const parent = isRoot ? null : StateLoader.getNodes().find((n) => n.id === node.parent_id);
       const maximize = StateLoader.getMaximize();
       if (parent && parent.score !== null) {
@@ -63,113 +66,33 @@ function renderIterations() {
         else score.classList.add('no-change');
       }
     }
+    row.appendChild(score);
 
-    header.appendChild(num);
-    header.appendChild(score);
-
-    // Badges
     if (isBest) {
       const badge = document.createElement('span');
       badge.className = 'iteration-badge badge-best';
-      badge.textContent = '\u2B50 BEST';
-      header.appendChild(badge);
+      badge.textContent = 'BEST';
+      row.appendChild(badge);
     }
 
     if (isActualError) {
       const badge = document.createElement('span');
       badge.className = 'iteration-badge badge-timeout';
-      badge.textContent = '\u26A0 ERR';
-      header.appendChild(badge);
+      badge.textContent = 'ERR';
+      row.appendChild(badge);
     }
 
-    if (node.score === null && scoreReason === 'Baseline (no eval score)') {
-      const badge = document.createElement('span');
-      badge.className = 'iteration-badge';
-      badge.style.cssText = 'background:var(--accent-sky-dim);color:var(--accent-sky);';
-      badge.textContent = '\uD83C\uDF38 BASELINE';
-      header.appendChild(badge);
-    }
-
-    item.appendChild(header);
-
-    // Summary line from history or score reason (always shown)
-    const summary = document.createElement('div');
+    const summary = document.createElement('span');
     summary.className = 'iteration-summary';
     if (histEntry?.edit_summary) {
       summary.textContent = histEntry.edit_summary;
     } else if (node.score === null) {
-      summary.style.color = 'var(--text-muted)';
-      summary.textContent = scoreReason;
-    } else {
-      summary.style.color = 'var(--text-muted)';
-      summary.textContent = 'No edit summary';
+      summary.textContent = scoreReason || '';
     }
-    item.appendChild(summary);
+    row.appendChild(summary);
 
-    // Timestamp
-    if (histEntry?.datetime) {
-      const ts = document.createElement('div');
-      ts.className = 'iteration-time';
-      try {
-        ts.textContent = new Date(histEntry.datetime).toLocaleString();
-      } catch {
-        ts.textContent = histEntry.datetime;
-      }
-      item.appendChild(ts);
-    }
+    item.appendChild(row);
 
-    // Files
-    const files = [];
-    if (histEntry) {
-      if (histEntry.files_modified.length > 0) files.push(`M: ${histEntry.files_modified.join(', ')}`);
-      if (histEntry.files_added.length > 0) files.push(`A: ${histEntry.files_added.join(', ')}`);
-      if (histEntry.files_deleted.length > 0) files.push(`D: ${histEntry.files_deleted.join(', ')}`);
-    }
-    if (files.length > 0) {
-      const filesEl = document.createElement('div');
-      filesEl.className = 'iteration-files';
-      filesEl.textContent = files.join(' | ');
-      item.appendChild(filesEl);
-    }
-
-    // Inline diff section (hidden by default)
-    if (histEntry?.diff_text && histEntry.diff_text.trim()) {
-      const diffContainer = document.createElement('div');
-      diffContainer.className = 'iteration-diff';
-      diffContainer.style.cssText = 'display:none; margin-top:8px;';
-
-      const diffHeader = document.createElement('div');
-      diffHeader.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;padding:4px 0;font-size:12px;color:var(--accent-pink);';
-
-      const diffToggle = document.createElement('span');
-      diffToggle.textContent = '›';
-      diffToggle.style.cssText = 'font-size:9px;transition:transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);';
-
-      const diffLabel = document.createElement('span');
-      diffLabel.textContent = 'View diff';
-
-      diffHeader.appendChild(diffToggle);
-      diffHeader.appendChild(diffLabel);
-      diffContainer.appendChild(diffHeader);
-
-      const diffContent = document.createElement('div');
-      diffContent.className = 'diff-inline';
-      diffContent.style.cssText = 'display:none;';
-      diffContent.innerHTML = renderDiffInline(histEntry.diff_text);
-      diffContainer.appendChild(diffContent);
-
-      diffHeader.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const isHidden = diffContent.style.display === 'none';
-        diffContent.style.display = isHidden ? 'block' : 'none';
-        diffToggle.style.transform = isHidden ? 'rotate(90deg)' : '';
-        diffLabel.textContent = isHidden ? 'Hide diff' : 'View diff';
-      });
-
-      item.appendChild(diffContainer);
-    }
-
-    // Click to show node details in the bottom section
     item.addEventListener('click', () => {
       showNodeDetailToBottom(node);
     });

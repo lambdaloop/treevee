@@ -85,7 +85,8 @@ function createTreeNode(nodeData, allNodes, pathSet) {
 
   const header = document.createElement('div');
   header.className = 'tree-node-header';
-  if (onBestPath) header.classList.add('selected');
+  header.dataset.nodeId = nodeData.id;
+  if (onBestPath) header.classList.add('on-best-path');
 
   const toggle = document.createElement('span');
   toggle.className = 'tree-toggle';
@@ -248,8 +249,6 @@ function createTreeNode(nodeData, allNodes, pathSet) {
   // Info button opens node details panel
   infoBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    document.querySelectorAll('.tree-node-header.selected').forEach((el) => el.classList.remove('selected'));
-    header.classList.add('selected');
     showNodeDetailToBottom(nodeData);
   });
 
@@ -334,6 +333,30 @@ function collapseAll() {
   renderTree();
 }
 
+function highlightTreeNode(nodeId) {
+  // Expand ancestors so the target node is visible.
+  const nodes = StateLoader.getNodes();
+  const nodeMap = new Map();
+  for (const n of nodes) nodeMap.set(n.id, n);
+  let needsRerender = false;
+  let cur = nodeMap.get(nodeId);
+  while (cur && cur.parent_id) {
+    if (!expandedNodes.has(cur.parent_id)) {
+      expandedNodes.add(cur.parent_id);
+      needsRerender = true;
+    }
+    cur = nodeMap.get(cur.parent_id);
+  }
+  if (needsRerender) renderTree();
+
+  document.querySelectorAll('.tree-node-header.active').forEach((el) => el.classList.remove('active'));
+  const target = document.querySelector(`.tree-node-header[data-node-id="${nodeId}"]`);
+  if (target) {
+    target.classList.add('active');
+    target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
 function showNodeDetailToBottom(nodeData) {
   const diffSection = document.getElementById('diff-section');
   const diffOutput = document.getElementById('diff-output');
@@ -342,6 +365,8 @@ function showNodeDetailToBottom(nodeData) {
   if (!diffSection || !diffOutput || !closeBtn) {
     return;
   }
+
+  highlightTreeNode(nodeData.id);
 
   const shortId = nodeData.id.slice(0, 8);
   const isRoot = nodeData.stage === 'root';
@@ -544,7 +569,6 @@ function showNodeDetailToBottom(nodeData) {
   diffOutput.innerHTML = html;
   diffSection.style.display = 'block';
   closeBtn.style.display = 'inline-block';
-  diffSection.scrollIntoView({ behavior: 'smooth' });
 
   // Diff toggle (vs parent / vs root)
   const toggleParent = diffOutput.querySelector('#diff-toggle-parent');

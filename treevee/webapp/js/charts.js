@@ -495,18 +495,7 @@ function renderScoreChart() {
       animation: { duration: 600, easing: 'easeOutQuart' },
       interaction: { intersect: true, mode: 'nearest' },
       plugins: {
-        legend: {
-          display: true,
-          position: 'top',
-          align: 'end',
-          labels: {
-            color: '#f0e0ff',
-            usePointStyle: true,
-            pointStyleWidth: 10,
-            padding: 15,
-            font: { size: 11 },
-          },
-        },
+        legend: { display: false },
         title: {
           display: true,
           text: `${_chartImprovements.length} improvements along the path`,
@@ -519,12 +508,14 @@ function renderScoreChart() {
       scales: {
         x: {
           type: 'linear',
-          min: -1,
+          min: -2,
           ticks: {
             color: '#f0e0ff',
             font: { size: 10 },
             maxTicksLimit: 20,
+            callback: (value) => value >= 0 ? value : '',
           },
+          title: { display: true, text: 'Iteration', color: '#f0e0ff', font: { size: 12 } },
           grid: { color: 'rgba(80, 60, 110, 0.25)', drawBorder: false },
           border: { display: false },
         },
@@ -532,6 +523,7 @@ function renderScoreChart() {
           min: yMin,
           max: yMax,
           ticks: { color: '#f0e0ff', font: { size: 11 }, padding: 8 },
+          title: { display: true, text: 'Score', color: '#f0e0ff', font: { size: 12 } },
           grid: { color: 'rgba(80, 60, 110, 0.25)', drawBorder: false },
           border: { display: false },
         },
