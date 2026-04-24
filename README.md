@@ -46,6 +46,7 @@ Some opinionated differences relative to other frameworks:
 
 You can install with `uv` using: `uv tool install git+https://github.com/lambdaloop/treevee/`
 
+
 ## Project structure
 
 ```
@@ -90,6 +91,43 @@ For step 3, I prompted claude code to generate a label placement evaluation task
 - `treevee restore` — restore the codebase from a snapshot (best, root, or specific node)
 - `treevee tree` — print a tree summary of the run with scores and edit summaries
 - `treevee history` — print iterations in chronological order with scores and edit summaries
+
+## LLM models
+Configure your LLM providers in `~/.config/treevee/treevee.toml`. This file allows you to set different models, providers, and API keys for the planner and editor stages independently.
+
+The default is below:
+```toml
+[planner]
+model = "claude-sonnet-4-6"
+provider = "anthropic"
+api_key = "unset"
+
+[editor]
+model = "claude-sonnet-4-6"
+provider = "anthropic"
+api_key = "unset"
+```
+
+- `model`: The model identifier to use (e.g., `claude-sonnet-4-6`, `claude-haiku-4-5`).
+- `provider`: The API provider. Supported values include `anthropic`, `deepseek`, `openrouter`, or a custom base URL (useful for running local models).
+- `api_key`: The API key for the provider. Set to `"unset"` to explicitly remove the key from the environment, this is nice for using your existing claude code authentication.
+
+If a value is omitted, treevee falls back to its defaults (e.g., `claude-sonnet-4-6` for models, `anthropic` for provider).
+
+Here is what I currently use (using the Qwen3.6 model on a GPU using llama.cpp):
+```toml
+[planner]
+model = "claude-opus-4-6"
+provider = "anthropic"
+api_key = "unset"
+
+[editor]
+model = "Qwen3.6-35B-A3B"
+provider = "http://localhost:8080"
+api_key = "sk-no-key-required"
+```
+
+Anectodally, I have found that using the Opus models will explore larger changes to the code, whereas using Sonnet or Haiku models will mostly do hyperparameter tuning. 
 
 ## Safety
 
