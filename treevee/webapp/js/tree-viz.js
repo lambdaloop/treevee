@@ -193,7 +193,7 @@ function createTreeNode(nodeData, allNodes, pathSet) {
 
   // Stage emoji
   const stageEmoji = document.createElement('span');
-  stageEmoji.style.cssText = 'font-size:11px;flex-shrink:0;';
+  stageEmoji.style.cssText = 'font-size:15px;flex-shrink:0;';
   stageEmoji.textContent = stageEmojis[nodeData.stage] || '';
   header.appendChild(stageEmoji);
 
@@ -261,7 +261,7 @@ function renderTree() {
   container.innerHTML = '';
 
   if (nodes.length === 0) {
-    container.innerHTML = '<p style="color:var(--text-muted); padding:16px; text-align:center;">No tree data yet~ (｡•́︿•̀｡) <br><span style="font-size:11px;opacity:0.6;">the tree is sleeping... 🌸💤</span></p>';
+    container.innerHTML = '<p style="color:var(--text-muted); padding:16px; text-align:center;">No tree data yet~ (｡•́︿•̀｡) <br><span style="font-size:15px;opacity:0.6;">the tree is sleeping... 🌸💤</span></p>';
     return;
   }
 
@@ -279,7 +279,7 @@ function renderTree() {
   if (allScores.length > 0) {
     const rangeItem = document.createElement('div');
     rangeItem.className = 'legend-item';
-    rangeItem.style.cssText = 'color:#e8d4f4;font-size:10px;font-family:monospace;';
+    rangeItem.style.cssText = 'color:#e8d4f4;font-size:15px;font-family:monospace;';
     rangeItem.textContent = `score ${Math.min(...allScores).toFixed(3)}–${Math.max(...allScores).toFixed(3)}`;
     legend.appendChild(rangeItem);
   }
@@ -377,7 +377,8 @@ function showNodeDetailToBottom(nodeData) {
   let html = '';
 
   // Header
-  html += `<p style="color:var(--text-secondary); padding:8px 0; font-size:13px;"><strong>${stageEmojis[nodeData.stage] || ''} ${nodeData.stage} node [${shortId}]</strong> (Step ${nodeData.step})</p>`;
+  const completedStr = historyEntry && historyEntry.datetime ? (() => { try { return new Date(historyEntry.datetime).toLocaleString(); } catch { return historyEntry.datetime; } })() : '';
+  html += `<p style="color:var(--text-secondary); padding:8px 0; font-size:15px;"><strong>${stageEmojis[nodeData.stage] || ''} ${nodeData.stage} node [${shortId}]</strong> (Step ${nodeData.step})${completedStr ? ' <span style="color:var(--text-muted);font-size:15px;margin-left:8px;">' + escapeHtml(completedStr) + '</span>' : ''}</p>`;
 
   // Status banners
   if (isBest) {
@@ -397,51 +398,39 @@ function showNodeDetailToBottom(nodeData) {
     const isImprovement = maximize ? delta > 0 : delta < 0;
     const isDegradation = maximize ? delta < 0 : delta > 0;
     const deltaColor = isImprovement ? 'var(--accent-mint)' : isDegradation ? 'var(--accent-peach)' : 'var(--text-secondary)';
-    html += `<p style="color:${deltaColor}; padding:4px 0; font-size:13px;font-weight:600;">Score: ${parent.score.toFixed(4)} → ${nodeData.score.toFixed(4)} (${delta > 0 ? '+' : ''}${delta.toFixed(4)})</p>`;
+    html += `<p style="color:${deltaColor}; padding:4px 0; font-size:15px;font-weight:600;">Score: ${parent.score.toFixed(4)} → ${nodeData.score.toFixed(4)} (${delta > 0 ? '+' : ''}${delta.toFixed(4)})</p>`;
   } else if (nodeData.score !== null) {
-    html += `<p style="color:var(--text-secondary); padding:4px 0; font-size:13px;">Score: ${nodeData.score.toFixed(4)}</p>`;
+    html += `<p style="color:var(--text-secondary); padding:4px 0; font-size:15px;">Score: ${nodeData.score.toFixed(4)}</p>`;
   } else if (parent && parent.score !== null) {
-    html += `<p style="color:var(--accent-peach); padding:4px 0; font-size:13px;">Score: ${parent.score.toFixed(4)} → N/A</p>`;
+    html += `<p style="color:var(--accent-peach); padding:4px 0; font-size:15px;">Score: ${parent.score.toFixed(4)} → N/A</p>`;
   }
 
-  // Node info
-  html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;font-size:12px;">';
-  html += detailRow('Stage', nodeData.stage);
-  html += detailRow('Depth', nodeData.depth);
-  html += detailRow('Visits', nodeData.visits);
-  html += detailRow('Reward', nodeData.total_reward != null ? nodeData.total_reward.toFixed(4) : 'N/A');
-  html += detailRow('Branch', nodeData.branch_id ?? 'N/A');
-  html += detailRow('Parent', parent ? `Step ${parent.step}` : 'Root');
-  if (nodeData.score !== null) {
-    html += detailRow('Score', nodeData.score.toFixed(6));
-  } else {
-    html += `<div class="detail-row"><span class="detail-label">Score</span><span class="detail-value" style="color:var(--accent-peach);">None</span></div>`;
-  }
-  html += '</div>';
+  // Node info — single line
+  const rewardVal = nodeData.total_reward != null ? nodeData.total_reward.toFixed(4) : 'N/A';
+  html += '<p style="font-size:15px;color:var(--text-secondary);margin:0 0 8px 0;">';
+  html += `<strong>Parent:</strong> ${parent ? 'Step ' + parent.step : 'Root'} · `;
+  html += `<strong>Visits:</strong> ${nodeData.visits} · `;
+  html += `<strong>Depth:</strong> ${nodeData.depth} · `;
+  html += `<strong>Tree Reward:</strong> ${rewardVal}`;
+  html += '</p>';
 
-  // History info
+  // History info — compact grid
   if (historyEntry) {
-    html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;font-size:12px;">';
-    html += '<h4 style="color:var(--accent-pink);margin-bottom:6px;font-size:13px;">Iteration Details</h4>';
-    html += detailRow('Iteration', historyEntry.iter);
-    if (historyEntry.timed_out) {
-      html += `<div class="detail-row"><span class="detail-label" style="color:var(--accent-peach);">Timeout</span><span class="detail-value" style="color:var(--accent-peach);">Yes</span></div>`;
-    }
-    html += detailRow('Exec Time', `${historyEntry.exec_time.toFixed(2)}s`);
-    if (historyEntry.datetime) {
-      try {
-        html += detailRow('Completed', new Date(historyEntry.datetime).toLocaleString());
-      } catch {
-        html += detailRow('Completed', historyEntry.datetime);
-      }
-    }
-    html += detailRow('Files Modified', historyEntry.files_modified.length ? historyEntry.files_modified.join(', ') : 'None');
-    html += detailRow('Files Added', historyEntry.files_added.length ? historyEntry.files_added.join(', ') : 'None');
-    html += detailRow('Files Deleted', historyEntry.files_deleted.length ? historyEntry.files_deleted.join(', ') : 'None');
     if (historyEntry.edit_summary) {
+      html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;margin-bottom:8px;font-size:15px;">';
       html += detailRow('Edit Summary', historyEntry.edit_summary);
+      html += '</div>';
     }
-    html += '</div>';
+
+    // Files changed
+    const hasFiles = historyEntry.files_modified.length || historyEntry.files_added.length || historyEntry.files_deleted.length;
+    if (hasFiles) {
+      html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:6px 8px;margin-bottom:8px;font-size:15px;">';
+      if (historyEntry.files_modified.length) html += detailRow('Modified', historyEntry.files_modified.join(', '));
+      if (historyEntry.files_added.length) html += detailRow('Added', historyEntry.files_added.join(', '));
+      if (historyEntry.files_deleted.length) html += detailRow('Deleted', historyEntry.files_deleted.join(', '));
+      html += '</div>';
+    }
 
   }
 
@@ -461,28 +450,25 @@ function showNodeDetailToBottom(nodeData) {
     const title = isError ? 'Error Output' : 'Evaluation Output';
 
     html += `<div style="background:${sectionBg};border:1px solid ${sectionBorder};border-radius:6px;padding:10px;margin-bottom:12px;">`;
-    html += `<h4 style="color:${headerColor};margin-bottom:6px;font-size:13px;">${title}</h4>`;
+    html += `<h4 style="color:${headerColor};margin-bottom:6px;font-size:15px;">${title}</h4>`;
 
     // Show timeout/exec_time from history entry
     if (hasHistoryEntry) {
-      if (historyEntry.timed_out) {
-        html += `<div class="detail-row"><span class="detail-label" style="color:var(--accent-peach);">Status</span><span class="detail-value" style="color:var(--accent-peach);">Timed out</span></div>`;
-      } else {
-        html += `<div class="detail-row"><span class="detail-label">Status</span><span class="detail-value">OK</span></div>`;
-      }
-      html += detailRow('Exec Time', `${historyEntry.exec_time.toFixed(2)}s`);
+      const statusText = historyEntry.timed_out ? 'Timed out' : 'OK';
+      const statusColor = historyEntry.timed_out ? 'var(--accent-peach)' : 'var(--text-muted)';
+      html += `<div class="detail-row" style="gap:0;"><span class="detail-label">Exec Time</span><span class="detail-value">${historyEntry.exec_time.toFixed(2)}s</span><span class="detail-value" style="color:${statusColor};margin-left:16px;">Status ${statusText}</span></div>`;
     }
 
     if (hasEvalOutput) {
       const evalPreview = nodeData.eval_output;
       const isLong = evalPreview.length > 400;
       const display = isLong ? evalPreview.slice(0, 400) + '\n... (truncated)' : evalPreview;
-      html += `<pre style="background:${preBg};padding:10px;border-radius:6px;font-size:11px;overflow:auto;max-height:200px;border:1px solid ${preBorder};color:${preColor};white-space:pre-wrap;word-break:break-word;">${escapeHtml(display)}</pre>`;
+      html += `<pre style="background:${preBg};padding:10px;border-radius:6px;font-size:14px;overflow:auto;max-height:200px;border:1px solid ${preBorder};color:${preColor};white-space:pre-wrap;word-break:break-word;">${escapeHtml(display)}</pre>`;
       if (isLong) {
-        html += `<button class="expand-btn" style="background:${btnBg};color:${btnColor};border:1px solid ${sectionBorder};padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;margin-top:6px;">Show full output (${evalPreview.length} chars)</button>`;
+        html += `<button class="expand-btn" style="background:${btnBg};color:${btnColor};border:1px solid ${sectionBorder};padding:4px 10px;border-radius:4px;font-size:15px;cursor:pointer;margin-top:6px;">Show full output (${evalPreview.length} chars)</button>`;
       }
     } else if (hasHistoryEntry) {
-      html += `<p style="color:var(--text-muted); padding:4px 0; font-size:11px;">No eval output captured.</p>`;
+      html += `<p style="color:var(--text-muted); padding:4px 0; font-size:15px;">No eval output captured.</p>`;
     }
     html += '</div>';
   }
@@ -490,9 +476,9 @@ function showNodeDetailToBottom(nodeData) {
   // Diff (with vs-parent / vs-root toggle)
   html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;">';
   html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
-  html += '<h4 style="color:var(--accent-lavender);font-size:13px;margin:0;">Code Diff</h4>';
+  html += '<h4 style="color:var(--accent-lavender);font-size:15px;margin:0;">Code Diff</h4>';
   if (!isRoot) {
-    const btnBase = 'border:1px solid var(--border-color);border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;';
+    const btnBase = 'border:1px solid var(--border-color);border-radius:4px;padding:2px 8px;font-size:15px;cursor:pointer;';
     html += `<button id="diff-toggle-parent" class="active" style="${btnBase}background:var(--accent-lavender);color:var(--bg-primary);">vs parent</button>`;
     html += `<button id="diff-toggle-root" class="inactive" style="${btnBase}background:var(--bg-tertiary);color:var(--accent-lavender);">vs root</button>`;
   }
@@ -501,9 +487,9 @@ function showNodeDetailToBottom(nodeData) {
   if (historyEntry?.diff_text && historyEntry.diff_text.trim()) {
     html += renderDiffHTML(historyEntry.diff_text);
   } else if (isRoot) {
-    html += '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">This is the root node.</p>';
+    html += '<p style="color:var(--text-muted); padding:4px 0; font-size:15px;">This is the root node.</p>';
   } else {
-    html += '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">No diff available (no history entry for this step).</p>';
+    html += '<p style="color:var(--text-muted); padding:4px 0; font-size:15px;">No diff available (no history entry for this step).</p>';
   }
   html += '</div>';
   html += '</div>';
@@ -515,10 +501,10 @@ function showNodeDetailToBottom(nodeData) {
       const pInputLong = pInput.length > 600;
       const pInputDisplay = pInputLong ? pInput.slice(0, 600) + '\n... (truncated, click to expand)' : pInput;
       html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;">';
-      html += '<h4 style="color:var(--accent-sky);margin-bottom:6px;font-size:13px;">Planner Input</h4>';
-      html += `<pre id="planner-input-display" style="background:var(--bg-tertiary);padding:10px;border-radius:6px;font-size:11px;overflow:auto;max-height:300px;border:1px solid var(--border-color);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;">${escapeHtml(pInputDisplay)}</pre>`;
+      html += '<h4 style="color:var(--accent-sky);margin-bottom:6px;font-size:15px;">Planner Input</h4>';
+      html += `<pre id="planner-input-display" style="background:var(--bg-tertiary);padding:10px;border-radius:6px;font-size:14px;overflow:auto;max-height:300px;border:1px solid var(--border-color);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;">${escapeHtml(pInputDisplay)}</pre>`;
       if (pInputLong) {
-        html += `<button id="planner-input-expand" style="background:var(--bg-tertiary);color:var(--accent-sky);border:1px solid var(--border-color);padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;margin-top:6px;">Show full planner input (${pInput.length} chars)</button>`;
+        html += `<button id="planner-input-expand" style="background:var(--bg-tertiary);color:var(--accent-sky);border:1px solid var(--border-color);padding:4px 10px;border-radius:4px;font-size:15px;cursor:pointer;margin-top:6px;">Show full planner input (${pInput.length} chars)</button>`;
       }
       html += '</div>';
     }
@@ -529,10 +515,10 @@ function showNodeDetailToBottom(nodeData) {
       const pOutputLong = pOutput.length > 600;
       const pOutputDisplay = pOutputLong ? pOutput.slice(0, 600) + '\n... (truncated, click to expand)' : pOutput;
       html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;">';
-      html += '<h4 style="color:var(--accent-mint);margin-bottom:6px;font-size:13px;">Planner Output</h4>';
-      html += `<pre id="planner-output-display" style="background:var(--bg-tertiary);padding:10px;border-radius:6px;font-size:11px;overflow:auto;max-height:300px;border:1px solid var(--border-color);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;">${escapeHtml(pOutputDisplay)}</pre>`;
+      html += '<h4 style="color:var(--accent-mint);margin-bottom:6px;font-size:15px;">Planner Output</h4>';
+      html += `<pre id="planner-output-display" style="background:var(--bg-tertiary);padding:10px;border-radius:6px;font-size:14px;overflow:auto;max-height:300px;border:1px solid var(--border-color);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;">${escapeHtml(pOutputDisplay)}</pre>`;
       if (pOutputLong) {
-        html += `<button id="planner-output-expand" style="background:var(--bg-tertiary);color:var(--accent-mint);border:1px solid var(--border-color);padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;margin-top:6px;">Show full planner output (${pOutput.length} chars)</button>`;
+        html += `<button id="planner-output-expand" style="background:var(--bg-tertiary);color:var(--accent-mint);border:1px solid var(--border-color);padding:4px 10px;border-radius:4px;font-size:15px;cursor:pointer;margin-top:6px;">Show full planner output (${pOutput.length} chars)</button>`;
       }
       html += '</div>';
     }
@@ -543,10 +529,10 @@ function showNodeDetailToBottom(nodeData) {
       const eInputLong = eInput.length > 600;
       const eInputDisplay = eInputLong ? eInput.slice(0, 600) + '\n... (truncated, click to expand)' : eInput;
       html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;">';
-      html += '<h4 style="color:var(--accent-lavender);margin-bottom:6px;font-size:13px;">Editor Input</h4>';
-      html += `<pre id="editor-input-display" style="background:var(--bg-tertiary);padding:10px;border-radius:6px;font-size:11px;overflow:auto;max-height:300px;border:1px solid var(--border-color);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;">${escapeHtml(eInputDisplay)}</pre>`;
+      html += '<h4 style="color:var(--accent-lavender);margin-bottom:6px;font-size:15px;">Editor Input</h4>';
+      html += `<pre id="editor-input-display" style="background:var(--bg-tertiary);padding:10px;border-radius:6px;font-size:14px;overflow:auto;max-height:300px;border:1px solid var(--border-color);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;">${escapeHtml(eInputDisplay)}</pre>`;
       if (eInputLong) {
-        html += `<button id="editor-input-expand" style="background:var(--bg-tertiary);color:var(--accent-lavender);border:1px solid var(--border-color);padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;margin-top:6px;">Show full editor input (${eInput.length} chars)</button>`;
+        html += `<button id="editor-input-expand" style="background:var(--bg-tertiary);color:var(--accent-lavender);border:1px solid var(--border-color);padding:4px 10px;border-radius:4px;font-size:15px;cursor:pointer;margin-top:6px;">Show full editor input (${eInput.length} chars)</button>`;
       }
       html += '</div>';
     }
@@ -557,10 +543,10 @@ function showNodeDetailToBottom(nodeData) {
       const eOutputLong = eOutput.length > 600;
       const eOutputDisplay = eOutputLong ? eOutput.slice(0, 600) + '\n... (truncated, click to expand)' : eOutput;
       html += '<div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;padding:10px;margin-bottom:12px;">';
-      html += '<h4 style="color:var(--accent-pink);margin-bottom:6px;font-size:13px;">Editor Output</h4>';
-      html += `<pre id="editor-output-display" style="background:var(--bg-tertiary);padding:10px;border-radius:6px;font-size:11px;overflow:auto;max-height:300px;border:1px solid var(--border-color);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;">${escapeHtml(eOutputDisplay)}</pre>`;
+      html += '<h4 style="color:var(--accent-pink);margin-bottom:6px;font-size:15px;">Editor Output</h4>';
+      html += `<pre id="editor-output-display" style="background:var(--bg-tertiary);padding:10px;border-radius:6px;font-size:14px;overflow:auto;max-height:300px;border:1px solid var(--border-color);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;">${escapeHtml(eOutputDisplay)}</pre>`;
       if (eOutputLong) {
-        html += `<button id="editor-output-expand" style="background:var(--bg-tertiary);color:var(--accent-pink);border:1px solid var(--border-color);padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;margin-top:6px;">Show full editor output (${eOutput.length} chars)</button>`;
+        html += `<button id="editor-output-expand" style="background:var(--bg-tertiary);color:var(--accent-pink);border:1px solid var(--border-color);padding:4px 10px;border-radius:4px;font-size:15px;cursor:pointer;margin-top:6px;">Show full editor output (${eOutput.length} chars)</button>`;
       }
       html += '</div>';
     }
@@ -587,7 +573,7 @@ function showNodeDetailToBottom(nodeData) {
       if (historyEntry?.diff_text && historyEntry.diff_text.trim()) {
         diffContent.innerHTML = renderDiffHTML(historyEntry.diff_text);
       } else {
-        diffContent.innerHTML = '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">No diff available (no history entry for this step).</p>';
+        diffContent.innerHTML = '<p style="color:var(--text-muted); padding:4px 0; font-size:15px;">No diff available (no history entry for this step).</p>';
       }
     }
 
@@ -595,23 +581,23 @@ function showNodeDetailToBottom(nodeData) {
       setActive(toggleRoot, toggleParent);
       if (rootDiffCache[nodeData.id] !== undefined) {
         const cached = rootDiffCache[nodeData.id];
-        diffContent.innerHTML = cached ? renderDiffHTML(cached) : '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">No changes from root.</p>';
+        diffContent.innerHTML = cached ? renderDiffHTML(cached) : '<p style="color:var(--text-muted); padding:4px 0; font-size:15px;">No changes from root.</p>';
         return;
       }
-      diffContent.innerHTML = '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">Loading root diff\u2026</p>';
+      diffContent.innerHTML = '<p style="color:var(--text-muted); padding:4px 0; font-size:15px;">Loading root diff\u2026</p>';
       try {
         const res = await fetch(`/api/diff_from_root?node_id=${encodeURIComponent(nodeData.id)}`);
         const data = await res.json();
         if (!res.ok) {
-          diffContent.innerHTML = `<p style="color:var(--accent-peach); padding:4px 0; font-size:12px;">Could not compute root diff: ${escapeHtml(data.error || res.statusText)}</p>`;
+          diffContent.innerHTML = `<p style="color:var(--accent-peach); padding:4px 0; font-size:15px;">Could not compute root diff: ${escapeHtml(data.error || res.statusText)}</p>`;
           return;
         }
         rootDiffCache[nodeData.id] = data.diff_text || '';
         diffContent.innerHTML = data.diff_text?.trim()
           ? renderDiffHTML(data.diff_text)
-          : '<p style="color:var(--text-muted); padding:4px 0; font-size:12px;">No changes from root.</p>';
+          : '<p style="color:var(--text-muted); padding:4px 0; font-size:15px;">No changes from root.</p>';
       } catch (e) {
-        diffContent.innerHTML = `<p style="color:var(--accent-peach); padding:4px 0; font-size:12px;">Error fetching root diff.</p>`;
+        diffContent.innerHTML = `<p style="color:var(--accent-peach); padding:4px 0; font-size:15px;">Error fetching root diff.</p>`;
       }
     }
 

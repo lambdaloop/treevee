@@ -36,26 +36,6 @@ let _labelPositions = [];
 
 function _drawLabelBox(ctx, boxX, boxY, boxW, boxH, isHovered) {
   if (isHovered) {
-    // Big glow behind the box to make it visually pop forward.
-    ctx.save();
-    ctx.shadowColor = 'rgba(249, 168, 212, 0.9)';
-    ctx.shadowBlur = 18;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 0;
-    ctx.fillStyle = 'rgba(35, 21, 53, 1.0)';
-    ctx.beginPath();
-    ctx.roundRect(boxX - 4, boxY - 4, boxW + 8, boxH + 8, 6);
-    ctx.fill();
-    ctx.restore();
-
-    // Bright pink border.
-    ctx.strokeStyle = 'rgba(249, 168, 212, 1.0)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.roundRect(boxX - 4, boxY - 4, boxW + 8, boxH + 8, 6);
-    ctx.stroke();
-
-    // Fully opaque main box.
     ctx.fillStyle = 'rgba(35, 21, 53, 1.0)';
     ctx.beginPath();
     ctx.roundRect(boxX, boxY, boxW, boxH, 4);
@@ -63,9 +43,10 @@ function _drawLabelBox(ctx, boxX, boxY, boxW, boxH, isHovered) {
 
     ctx.strokeStyle = 'rgba(249, 168, 212, 1.0)';
     ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(boxX, boxY, boxW, boxH, 4);
     ctx.stroke();
   } else {
-    // Non-hovered: fully opaque but darker background.
     ctx.fillStyle = 'rgba(25, 15, 40, 1.0)';
     ctx.beginPath();
     ctx.roundRect(boxX, boxY, boxW, boxH, 4);
@@ -73,6 +54,8 @@ function _drawLabelBox(ctx, boxX, boxY, boxW, boxH, isHovered) {
 
     ctx.strokeStyle = 'rgba(249, 168, 212, 0.4)';
     ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(boxX, boxY, boxW, boxH, 4);
     ctx.stroke();
   }
 }
@@ -327,7 +310,7 @@ const labelPlugin = {
     const labels = [];
 
     ctx.save();
-    ctx.font = '9px sans-serif';
+    ctx.font = '11px sans-serif';
 
     let dataIdx = 0;
     for (const p of currentProgression) {
@@ -341,7 +324,7 @@ const labelPlugin = {
       if (hasLabel) {
         const lines = wrapText(ctx, p.editSummary, MAX_TEXT_W);
         const boxW = Math.min(Math.max(...lines.map((l) => ctx.measureText(l).width)), MAX_TEXT_W) + 12;
-        const boxH = lines.length * 12 + (lines.length - 1) * 2 + 10;
+        const boxH = lines.length * 15 + (lines.length - 1) * 3 + 10;
         allW.push(boxW);
         allH.push(boxH);
         labelIndices.push(allX.length - 1);
@@ -407,12 +390,15 @@ const labelPlugin = {
       _drawLabelBox(ctx, l.boxX, l.boxY, l.boxW, l.boxH, false);
 
       ctx.save();
-      ctx.font = '9px sans-serif';
+      ctx.font = '11px sans-serif';
       ctx.fillStyle = 'rgba(249, 168, 212, 0.95)';
-      ctx.textAlign = 'left';
+      ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
+      const textCenterX = l.boxX + l.boxW / 2;
+      const textBlockH = l.lines.length * 16;
+      const textTopY = l.boxY + (l.boxH - textBlockH) / 2 + 8;
       l.lines.forEach((line, i) => {
-        ctx.fillText(line, l.boxX + 6, l.boxY + 5 + i * 14 + 6);
+        ctx.fillText(line, textCenterX, textTopY + i * 16);
       });
       ctx.restore();
     }
@@ -425,12 +411,15 @@ const labelPlugin = {
         _drawLabelBox(ctx, l.boxX, l.boxY, l.boxW, l.boxH, true);
 
         ctx.save();
-        ctx.font = '9px sans-serif';
+        ctx.font = '11px sans-serif';
         ctx.fillStyle = 'rgba(249, 168, 212, 0.95)';
-        ctx.textAlign = 'left';
+        ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
+        const textCenterX = l.boxX + l.boxW / 2;
+        const textBlockH = l.lines.length * 16;
+        const textTopY = l.boxY + (l.boxH - textBlockH) / 2 + 8;
         l.lines.forEach((line, i) => {
-          ctx.fillText(line, l.boxX + 6, l.boxY + 5 + i * 14 + 6);
+          ctx.fillText(line, textCenterX, textTopY + i * 16);
         });
         ctx.restore();
       }
@@ -526,11 +515,8 @@ function renderScoreChart() {
   const canvas = document.getElementById('score-chart');
   const ctx = canvas.getContext('2d');
 
-  // Pink → lavender → sky-blue gradient for the step line.
-  const lineGradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
-  lineGradient.addColorStop(0, 'rgba(249, 168, 212, 0.9)');
-  lineGradient.addColorStop(0.5, 'rgba(196, 168, 224, 0.95)');
-  lineGradient.addColorStop(1, 'rgba(135, 206, 235, 1)');
+  // Solid color for the step line.
+  const lineColor = 'rgba(200, 170, 220, 0.9)';
 
   scoreChart = new Chart(ctx, {
     type: 'scatter',
@@ -555,7 +541,7 @@ function renderScoreChart() {
           data: stepData,
           showLine: true,
           stepped: 'before',
-          borderColor: lineGradient,
+          borderColor: lineColor,
           borderWidth: 2,
           pointRadius: 0,
           pointHoverRadius: 0,
@@ -575,7 +561,7 @@ function renderScoreChart() {
           display: true,
           text: `${_chartImprovements.length} improvements along the path`,
           color: '#f0e0ff',
-          font: { size: 13, weight: 'normal' },
+          font: { size: 15, weight: 'normal' },
           padding: { bottom: 12 },
         },
         tooltip: { enabled: false },
@@ -586,19 +572,19 @@ function renderScoreChart() {
           min: -2,
           ticks: {
             color: '#f0e0ff',
-            font: { size: 10 },
+            font: { size: 14 },
             maxTicksLimit: 20,
             callback: (value) => value >= 0 ? value : '',
           },
-          title: { display: true, text: 'Iteration', color: '#f0e0ff', font: { size: 12 } },
+          title: { display: true, text: 'Iteration', color: '#f0e0ff', font: { size: 15 } },
           grid: { color: 'rgba(80, 60, 110, 0.25)', drawBorder: false },
           border: { display: false },
         },
         y: {
           min: yMin,
           max: yMax,
-          ticks: { color: '#f0e0ff', font: { size: 11 }, padding: 8 },
-          title: { display: true, text: 'Score', color: '#f0e0ff', font: { size: 12 } },
+          ticks: { color: '#f0e0ff', font: { size: 14 }, padding: 8 },
+          title: { display: true, text: 'Score', color: '#f0e0ff', font: { size: 15 } },
           grid: { color: 'rgba(80, 60, 110, 0.25)', drawBorder: false },
           border: { display: false },
         },

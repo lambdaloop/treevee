@@ -1,20 +1,14 @@
 function renderSummary() {
   const history = StateLoader.getHistory();
-  const tree = StateLoader.getTreeStructure();
   const bestScore = StateLoader.getBestScore();
-  const bestNodeId = StateLoader.getBestNodeId();
-  const bestIter = StateLoader.getBestIteration();
   const maximize = StateLoader.getMaximize();
-  const nodes = StateLoader.getNodes();
 
-  document.getElementById('sum-iterations').textContent = nodes.length;
-  document.getElementById('sum-best-score').textContent = bestScore !== null ? bestScore.toFixed(6) : 'N/A';
-  document.getElementById('sum-best-score').className = 'value best';
-  document.getElementById('sum-best-iter').textContent = bestIter !== null ? bestIter : '-';
-
-  document.getElementById('sum-nodes').textContent = nodes.length;
-  document.getElementById('sum-depth').textContent = tree?.max_depth ?? '-';
-  document.getElementById('sum-maximize').textContent = maximize ? '↑ yes' : '↓ no';
+  const bar = document.getElementById('summary-bar');
+  if (bar) {
+    const iterText = history.length > 0 ? history[history.length - 1].iter : '0';
+    const scoreColor = bestScore !== null ? 'var(--accent-mint)' : 'var(--text-muted)';
+    bar.innerHTML = `<strong>Best Score:</strong> <span style="color:${scoreColor};font-weight:700">${bestScore !== null ? bestScore.toFixed(6) : 'N/A'}</span>&emsp;&emsp;<strong>${maximize ? 'Maximizing' : 'Minimizing'} score:</strong> ${maximize ? '↑' : '↓'}&emsp;&emsp;<strong>Iterations:</strong> <span style="color:var(--accent-lavender);font-weight:600">${iterText}</span>`;
+  }
 }
 
 function renderIterations() {

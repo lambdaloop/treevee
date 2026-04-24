@@ -21,32 +21,7 @@
 
     <main id="dashboard" style="display:none">
       <!-- Summary bar -->
-      <section id="summary-bar">
-        <div class="summary-card">
-          <span class="label">Iterations</span>
-          <span class="value" id="sum-iterations">-</span>
-        </div>
-        <div class="summary-card">
-          <span class="label">Best Score</span>
-          <span class="value" id="sum-best-score">-</span>
-        </div>
-        <div class="summary-card">
-          <span class="label">Best Iteration</span>
-          <span class="value" id="sum-best-iter">-</span>
-        </div>
-        <div class="summary-card">
-          <span class="label">Tree Nodes</span>
-          <span class="value" id="sum-nodes">-</span>
-        </div>
-        <div class="summary-card">
-          <span class="label">Max Depth</span>
-          <span class="value" id="sum-depth">-</span>
-        </div>
-        <div class="summary-card">
-          <span class="label">Maximize</span>
-          <span class="value" id="sum-maximize">-</span>
-        </div>
-      </section>
+      <section id="summary-bar" style="font-size:15px;color:var(--text-secondary);margin-bottom:12px;"></section>
 
       <!-- Score chart -->
       <section id="chart-section">
@@ -77,10 +52,11 @@
 
       <!-- Node details section -->
       <section id="diff-section" style="display:none">
-        <h2>Node Details</h2>
-        <div class="diff-controls">
+        <div class="section-header">
+          <h2>Node Details</h2>
           <button id="close-diff" style="display:none">Close</button>
         </div>
+        <div class="diff-controls">
         <div id="diff-output" class="diff-output"></div>
       </section>
 
