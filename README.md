@@ -1,4 +1,6 @@
-# treevee - optimize anything with a scoring function, tree search, and large language models 
+# treevee 
+
+Optimize anything with a scoring function, tree search, and large language models. 
 
 ![Screenshot of treevee interface](./header.png)
 
