@@ -55,7 +55,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 import hashlib
-import tomllib
+import toml
 
 from treevee.tree_search import TreeSearch
 from treevee.utils.metric import MetricValue
@@ -688,8 +688,7 @@ def _load_config_file() -> dict:
         return {}
 
     try:
-        with open(config_path, "rb") as f:
-            return tomllib.load(f)
+        return toml.load(config_path)
     except Exception as e:
         _run_logger.warning(f"Failed to load treevee config: {e}")
         return {}
@@ -3641,7 +3640,7 @@ def _load_task_config(codebase_dir: Path) -> dict[str, Any]:
     """Load task-specific configuration from config.toml.
 
     Reads <codebase_dir>/config.toml and returns a dict of configuration values.
-    Uses tomllib (Python 3.11+) or tomli as fallback.
+    Uses the toml library.
 
     Args:
         codebase_dir: Path to the codebase directory.
@@ -3653,14 +3652,7 @@ def _load_task_config(codebase_dir: Path) -> dict[str, Any]:
     if not config_path.exists():
         return {}
     try:
-        # Try tomllib first (Python 3.11+), fall back to tomli.
-        try:
-            import tomllib
-        except ImportError:
-            import tomli as tomllib
-
-        with open(config_path, "rb") as fh:
-            data: dict[str, Any] = tomllib.load(fh)
+        data: dict[str, Any] = toml.load(config_path)
         return data or {}
     except Exception as e:
         _run_logger.warning(f"Failed to load {config_path}: {e}")
