@@ -32,6 +32,4 @@ allow_network = true       # Allow network access inside the sandbox (default: t
 tmpdir = "/tmp"            # Directory to bind as /tmp inside the sandbox (default: /tmp)
 
 # ── Misc ─────────────────────────────────────────────────────────
-fake_run = false             # Random scores, no eval/LLM calls (default: false)
-reset = false                # Delete existing state and start fresh (default: false)
-print_claude_output = false  # Print Claude CLI output in real-time (default: false)
+verbose = false  # Print LLM agent output in real-time (default: false)

@@ -735,7 +735,7 @@ class EvoRunAgent:
         )
 
         self.fake_run = getattr(args, 'fake_run', False)
-        self.print_claude_output = getattr(args, 'print_claude_output', False)
+        self.verbose = getattr(args, 'verbose', False)
         self.enable_web_search = not getattr(args, 'disable_web_search', False)
 
         # LLM config from ~/.config/treevee/treevee.toml.
@@ -1166,7 +1166,7 @@ Produce a concise plan following this structure.
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="planner",
-                print_output=self.print_claude_output,
+                print_output=self.verbose,
             )
             if self._check_rate_limit(result):
                 return (planner_prompt, "")
@@ -1240,7 +1240,7 @@ Do NOT modify eval.py, evaluation.py, or external test harnesses.
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="editor",
-                print_output=self.print_claude_output,
+                print_output=self.verbose,
             )
             if self._check_rate_limit(result):
                 return (editor_prompt, "")
@@ -1338,7 +1338,7 @@ Produce a concise fix plan following this structure.
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="planner",
-                print_output=self.print_claude_output,
+                print_output=self.verbose,
             )
             if self._check_rate_limit(result):
                 return (planner_prompt, "")
@@ -1394,7 +1394,7 @@ Do not try to improve the score — just fix the errors.
                 retries=getattr(self, 'llm_retries', 3),
                 retry_base_delay=getattr(self, 'llm_retry_base_delay', 3.0),
                 stage="editor",
-                print_output=self.print_claude_output,
+                print_output=self.verbose,
             )
             if self._check_rate_limit(result):
                 return (editor_prompt, "")
@@ -1842,7 +1842,7 @@ Do not try to improve the score — just fix the errors.
                 )
 
         # Print diff when debugging is enabled.
-        if diff_text and self.print_claude_output:
+        if diff_text and self.verbose:
             print(f"[Iter {self._iteration}] Diff:\n{diff_text}", flush=True)
 
         # Submit edit summary to background thread — runs in parallel
@@ -2812,7 +2812,7 @@ Produce a concise fusion plan following the Required Analysis structure above.
                 retries=2,
                 retry_base_delay=3.0,
                 stage="planner",
-                print_output=self.print_claude_output,
+                print_output=self.verbose,
             )
             if not self._check_rate_limit(fusion_plan_raw):
                 fusion_plan = fusion_plan_raw.strip()
@@ -2858,7 +2858,7 @@ a messy combination of several.
                     retries=2,
                     retry_base_delay=3.0,
                     stage="editor",
-                    print_output=self.print_claude_output,
+                    print_output=self.verbose,
                 )
                 if self._check_rate_limit(log_content):
                     log_content = ""
@@ -3595,13 +3595,11 @@ _ARGPARSE_DEFAULTS: dict[str, Any] = {
     "llm_retries": 3,
     "llm_retry_base_delay": 3.0,
     "decay_exploration": True,
-    "fake_run": False,
-    "reset": False,
     "eval_cmd": None,
     "use_fusion": True,
     "fusion_min_iters": 10,
     "fusion_prob": 0.5,
-    "print_claude_output": False,
+    "verbose": False,
     "sandbox": True,
     "allow_network": True,
     "tmpdir": "/tmp",
@@ -3619,12 +3617,10 @@ _CONFIG_TO_ARGPARSE: dict[str, str] = {
     "llm_retries": "llm_retries",
     "llm_retry_base_delay": "llm_retry_base_delay",
     "decay_exploration": "decay_exploration",
-    "fake_run": "fake_run",
-    "reset": "reset",
     "use_fusion": "use_fusion",
     "fusion_min_iters": "fusion_min_iters",
     "fusion_prob": "fusion_prob",
-    "print_claude_output": "print_claude_output",
+    "verbose": "verbose",
     "sandbox": "sandbox",
     "allow_network": "allow_network",
     "tmpdir": "tmpdir",
@@ -3780,9 +3776,9 @@ def _add_run_args(subparser: argparse.ArgumentParser) -> None:
         help="Port for the web visualization server (default: 9000)",
     )
     subparser.add_argument(
-        "--print-claude-output",
+        "--verbose",
         action="store_true",
-        help="Print Claude CLI output (planner/editor) in real-time for debugging",
+        help="Print LLM agent output (planner/editor) in real-time for debugging",
     )
     subparser.add_argument(
         "--disable-web-search",
