@@ -170,6 +170,7 @@ def _build_bwrap_cmd(
     The eval command is passed directly to sh -c inside the sandbox,
     preserving shell semantics (word splitting, globbing, etc.).
     """
+    Path(tmpdir).mkdir(parents=True, exist_ok=True)
     bwrap_args = [
         "bwrap",
         "--ro-bind", "/", "/",
