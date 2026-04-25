@@ -163,19 +163,18 @@ def _build_bwrap_cmd(
     eval_cmd: str,
     codebase_dir: Path,
     allow_network: bool = True,
+    tmpdir: str = "/tmp",
 ) -> list[str]:
     """Build bubblewrap command for the eval command.
 
     The eval command is passed directly to sh -c inside the sandbox,
     preserving shell semantics (word splitting, globbing, etc.).
     """
-    tmp_dir = codebase_dir / "tmp"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
     bwrap_args = [
         "bwrap",
         "--ro-bind", "/", "/",
         "--bind", str(codebase_dir), str(codebase_dir),
-        "--bind", str(tmp_dir), "/tmp",
+        "--bind", tmpdir, "/tmp",
         "--dev-bind", "/dev", "/dev",
         "--proc", "/proc",
         "--chdir", str(codebase_dir),
@@ -227,6 +226,7 @@ class Evaluator:
         codebase_dir: Path = Path("."),
         sandbox: bool = True,
         allow_network: bool = True,
+        tmpdir: str = "/tmp",
     ):
         """Initialize the evaluator.
 
@@ -236,12 +236,14 @@ class Evaluator:
             codebase_dir: Working directory to run from (for pixi env resolution).
             sandbox: Run the eval command inside a bubblewrap sandbox (default: True).
             allow_network: Allow network access inside the sandbox (default: True).
+            tmpdir: Directory to bind as /tmp inside the sandbox (default: "/tmp").
         """
         self.eval_cmd = eval_cmd
         self.eval_timeout = eval_timeout
         self.codebase_dir = codebase_dir
         self.sandbox = sandbox
         self.allow_network = allow_network
+        self.tmpdir = tmpdir
 
         if sandbox:
             if shutil.which("bwrap") is None:
@@ -269,7 +271,7 @@ class Evaluator:
         try:
             if self.sandbox:
                 cmd = _build_bwrap_cmd(
-                    self.eval_cmd, self.codebase_dir, self.allow_network
+                    self.eval_cmd, self.codebase_dir, self.allow_network, self.tmpdir
                 )
                 shell = False
             else:
@@ -728,6 +730,7 @@ class EvoRunAgent:
             codebase_dir=self.codebase.codebase_dir,
             sandbox=getattr(args, "sandbox", True),
             allow_network=getattr(args, "allow_network", True),
+            tmpdir=getattr(args, "tmpdir", "/tmp"),
         )
 
         self.fake_run = getattr(args, 'fake_run', False)
@@ -750,7 +753,7 @@ class EvoRunAgent:
 
         # Tree search max children
         self.tree_max_children = getattr(args, 'max_children', 10)
-        self.optim_mode = getattr(args, 'optim_mode', 'max')
+        self.optim_mode = getattr(args, 'optim_mode', 'min')
         self.tree = TreeSearch(maximize=(self.optim_mode == "max"), max_children=self.tree_max_children)
         self.tree.explore_c = self._get_decay_exploration_c()
 
@@ -3583,7 +3586,7 @@ a messy combination of several.
 # Default values for argparse arguments (used to detect if CLI was explicitly set).
 _ARGPARSE_DEFAULTS: dict[str, Any] = {
     "max_children": 10,
-    "optim_mode": "max",
+    "optim_mode": "min",
     "max_iters": 50,
     "time_limit": 0,
     "patience": 10,
@@ -3600,6 +3603,7 @@ _ARGPARSE_DEFAULTS: dict[str, Any] = {
     "print_claude_output": False,
     "sandbox": True,
     "allow_network": True,
+    "tmpdir": "/tmp",
 }
 
 # Mapping from config.toml keys to argparse destination names.
@@ -3622,6 +3626,7 @@ _CONFIG_TO_ARGPARSE: dict[str, str] = {
     "print_claude_output": "print_claude_output",
     "sandbox": "sandbox",
     "allow_network": "allow_network",
+    "tmpdir": "tmpdir",
 }
 
 
@@ -3692,8 +3697,8 @@ def _add_run_args(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--optim-mode",
         choices=["max", "min"],
-        default="max",
-        help="Optimization direction: 'max' to maximize score, 'min' to minimize (default: max)",
+        default="min",
+        help="Optimization direction: 'max' to maximize score, 'min' to minimize (default: min)",
     )
     subparser.add_argument(
         "--reset",
@@ -3800,6 +3805,11 @@ def _add_run_args(subparser: argparse.ArgumentParser) -> None:
         "--print-command",
         action="store_true",
         help="Print the full eval command (including sandboxing) and exit",
+    )
+    subparser.add_argument(
+        "--tmpdir",
+        default="/tmp",
+        help="Directory to bind as /tmp inside the bubblewrap sandbox (default: /tmp)",
     )
 
 
@@ -4009,7 +4019,8 @@ def _cmd_run(args: argparse.Namespace) -> None:
         allow_network = getattr(args, "allow_network", True)
         if sandbox:
             bwrap_args = _build_bwrap_cmd(
-                eval_cmd, codebase_root.resolve(), allow_network
+                eval_cmd, codebase_root.resolve(), allow_network,
+                tmpdir=getattr(args, "tmpdir", "/tmp"),
             )
             print(shlex.join(bwrap_args))
         else:
@@ -4252,7 +4263,7 @@ Key settings (all have defaults):
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `eval_cmd` | `pixi run python eval.py` | Command to run the eval |
-| `optim_mode` | `max` | `max` = higher score is better, `min` = lower |
+| `optim_mode` | `min` | `max` = higher score is better, `min` = lower |
 | `max_iters` | 50 | Number of optimization iterations |
 | `patience` | 10 | Stop if no improvement after N iters |
 | `eval_timeout` | 300 | Timeout per eval in seconds |

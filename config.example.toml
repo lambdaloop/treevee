@@ -8,24 +8,30 @@
 #   ~/.config/treevee/treevee.toml (planner/editor sections)
 
 # ── LLM ──────────────────────────────────────────────────────────
-llm_retries = 3
-llm_retry_base_delay = 3.0
+llm_retries = 3             # Retry LLM query on failure (default: 3)
+llm_retry_base_delay = 3.0  # Base delay (s) for exponential backoff (default: 3.0)
 
 # ── Search ───────────────────────────────────────────────────────
-eval_cmd = "pixi run python eval.py"
-optim_mode = "max"
-max_iters = 50
-time_limit = 0 # set in seconds, 0 means no limit
-patience = 10
-eval_timeout = 300
-max_children = 10
-decay_exploration = true
+eval_cmd = "pixi run python eval.py"  # Evaluation command to run
+optim_mode = "min"                     # Optimization direction: "max" or "min" (default: "min")
+max_iters = 50                         # Maximum number of iterations (default: 50)
+time_limit = 0                         # Wall-clock time limit in seconds, 0 = no limit
+patience = 10                          # Stagnation threshold per branch (default: 10)
+eval_timeout = 300                     # Timeout per evaluation run in seconds (default: 300)
+max_children = 10                      # Maximum child expansions per node (default: 10)
+decay_exploration = true               # Enable progressive UCT exploration decay (default: true)
 
 # ── Fusion ───────────────────────────────────────────────────────
-use_fusion = true
-fusion_min_iters = 10
-fusion_prob = 0.5
+use_fusion = true         # Enable cross-branch fusion agent (default: true)
+fusion_min_iters = 10     # Minimum iterations before fusion is allowed (default: 10)
+fusion_prob = 0.5         # Probability of using fusion after min iters (default: 0.5)
+
+# ── Sandboxing ───────────────────────────────────────────────────
+sandbox = true             # Run eval inside bubblewrap sandbox (default: true)
+allow_network = true       # Allow network access inside the sandbox (default: true)
+tmpdir = "/tmp"            # Directory to bind as /tmp inside the sandbox (default: /tmp)
 
 # ── Misc ─────────────────────────────────────────────────────────
-fake_run = false
-reset = false
+fake_run = false             # Random scores, no eval/LLM calls (default: false)
+reset = false                # Delete existing state and start fresh (default: false)
+print_claude_output = false  # Print Claude CLI output in real-time (default: false)
