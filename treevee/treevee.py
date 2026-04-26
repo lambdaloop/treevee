@@ -640,42 +640,55 @@ def _run_claude_cli_with_env(
     merged_env = _merge_env(env_overrides)
 
     def _do_call():
-        cmd = [
-            'claude',
-            '-p', prompt,
-            '--output-format', 'text',
-            '--max-turns', str(max_turns),
-            '--model', model,
-        ]
-        if allowed_tools:
-            cmd.extend(['--allowedTools'] + allowed_tools)
-
-        log_fh = open(log_file, "w", encoding="utf-8") if log_file else None
-        process = subprocess.Popen(
-            cmd,
-            cwd=cwd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            env=merged_env,
-        )
-        output_lines = []
-        bytes_printed = 0
+        # Write prompt to a temp file and pipe via stdin to avoid
+        # [Errno 7] Argument list too long when the prompt exceeds
+        # the OS ARG_MAX limit (common for fusion prompts with diffs).
+        prompt_fd, prompt_path = tempfile.mkstemp(suffix=".txt", prefix="claude_prompt_")
         try:
-            for line in process.stdout:
-                if print_output:
-                    print(line, end='', flush=True)
-                    bytes_printed += len(line.encode("utf-8"))
-                output_lines.append(line)
-                if log_fh:
-                    log_fh.write(line)
+            with os.fdopen(prompt_fd, "w", encoding="utf-8") as pf:
+                pf.write(prompt)
+
+            cmd = [
+                'claude',
+                '--output-format', 'text',
+                '--max-turns', str(max_turns),
+                '--model', model,
+            ]
+            if allowed_tools:
+                cmd.extend(['--allowedTools'] + allowed_tools)
+
+            log_fh = open(log_file, "w", encoding="utf-8") if log_file else None
+            with open(prompt_path, "r", encoding="utf-8") as stdin_fh:
+                process = subprocess.Popen(
+                    cmd,
+                    cwd=cwd,
+                    stdin=stdin_fh,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    env=merged_env,
+                )
+                output_lines = []
+                bytes_printed = 0
+                try:
+                    for line in process.stdout:
+                        if print_output:
+                            print(line, end='', flush=True)
+                            bytes_printed += len(line.encode("utf-8"))
+                        output_lines.append(line)
+                        if log_fh:
+                            log_fh.write(line)
+                finally:
+                    if log_fh:
+                        log_fh.close()
+                process.wait()
+                result = "".join(output_lines)
         finally:
-            if log_fh:
-                log_fh.close()
-        process.wait()
-        result = "".join(output_lines)
+            try:
+                os.unlink(prompt_path)
+            except OSError:
+                pass
         # Subprocess may buffer output when writing to a pipe (non-TTY),
         # causing all output to arrive at once after the process exits.
         # If nothing was printed during execution, print it now.
@@ -1775,7 +1788,6 @@ Do not try to improve the score — just fix the errors.
                 log_content = ""
 
             planner_input = error_planner_input
-            editor_input = error_editor_input
 
         # Build feedback (always, for logging and next iteration)
         parent_score = target_node.parent.metric.value if target_node.parent and target_node.parent.metric else None
@@ -2887,6 +2899,7 @@ Produce a concise fusion plan following the Required Analysis structure above.
             _run_logger.warning(f"[Fusion] Planner failed: {e}")
             fusion_plan = ""
 
+        fusion_editor_input = ""  # ensure bound for return below
         if fusion_plan and fusion_plan.strip():
             # Fusion editor
             fusion_editor_env = _build_claude_env(self.editor_provider, self.editor_model, self.editor_api_key)
