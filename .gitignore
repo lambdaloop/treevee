@@ -74,3 +74,9 @@ logs/
 
 # ===== Treevee Runtime (examples) =====
 .treevee/
+
+# Tool artifacts
+.aider*
+.maki/
+PROMPTS.md
+migrate_state.py
