@@ -154,9 +154,30 @@ class HistoryEntry:
 
 
 # ────────────────────────────────────────────────────────────
-# Bubblewrap sandbox helper
+# Sandbox helpers
+#
+# Platform-native: bwrap on Linux, zerobox (Seatbelt) on macOS.
+# Zerobox 0.2.6 cannot bind /dev correctly on Linux — it always emits
+# `--dev /dev` then `--bind /dev /dev`, which shadows host devices and
+# breaks /dev/urandom + GPU access (bwrap#248, openai/codex#3141).
+# Direct bwrap with `--dev-bind /dev /dev` works fine.
 # ────────────────────────────────────────────────────────────
 
+
+def _find_zerobox() -> str | None:
+    """Locate the zerobox CLI binary (macOS).
+
+    Tries $PATH first, then the running interpreter's bin/ directory.
+    The fallback covers isolated installs (uv tool install, pipx) where
+    zerobox lives in the tool's venv but isn't on the user's PATH.
+    """
+    p = shutil.which("zerobox")
+    if p:
+        return p
+    candidate = Path(sys.executable).parent / "zerobox"
+    if candidate.is_file():
+        return str(candidate)
+    return None
 
 
 def _build_bwrap_cmd(
@@ -165,10 +186,11 @@ def _build_bwrap_cmd(
     allow_network: bool = True,
     tmpdir: str = "/tmp",
 ) -> list[str]:
-    """Build bubblewrap command for the eval command.
+    """Build bubblewrap argv for the eval command (Linux).
 
-    The eval command is passed directly to sh -c inside the sandbox,
-    preserving shell semantics (word splitting, globbing, etc.).
+    Read-only root + RW bind on codebase_dir + RW bind on tmpdir
+    (remapped to /tmp inside). --dev-bind /dev /dev for GPU device
+    access. eval_cmd runs via sh -c.
     """
     Path(tmpdir).mkdir(parents=True, exist_ok=True)
     bwrap_args = [
@@ -187,8 +209,79 @@ def _build_bwrap_cmd(
     else:
         bwrap_args.append("--unshare-net")
     bwrap_args.extend(["sh", "-c", eval_cmd])
-
     return bwrap_args
+
+
+def _build_zerobox_cmd(
+    eval_cmd: str,
+    codebase_dir: Path,
+    allow_network: bool = True,
+    tmpdir: str = "/tmp",
+) -> list[str]:
+    """Build zerobox CLI argv for the eval command (macOS).
+
+    Uses zerobox's `system-read-macos` profile to avoid the default
+    profile's deny-* lists (which would trigger FD-reuse bugs even on
+    macOS). tmpdir is exposed as TMPDIR in the subprocess env (set by
+    Evaluator.run) since zerobox can't bind-remap paths.
+    """
+    Path(tmpdir).mkdir(parents=True, exist_ok=True)
+    args = [
+        _find_zerobox() or "zerobox",
+        "--profile", "system-read-macos",
+        "--allow-read=/",
+        f"--allow-write={codebase_dir},{tmpdir}",
+        "-C", str(codebase_dir),
+        # Inherit the full host env (PATH, HOME, TMPDIR, …) — matches
+        # bwrap's behavior of running with an unfiltered env.
+        "--allow-env",
+    ]
+    if allow_network:
+        args.append("--allow-net")
+    args.append("--")
+    args.extend(["sh", "-c", eval_cmd])
+    return args
+
+
+def _build_sandbox_cmd(
+    eval_cmd: str,
+    codebase_dir: Path,
+    allow_network: bool = True,
+    tmpdir: str = "/tmp",
+) -> list[str]:
+    """Dispatch to the platform-native sandbox builder."""
+    if sys.platform == "darwin":
+        return _build_zerobox_cmd(eval_cmd, codebase_dir, allow_network, tmpdir)
+    return _build_bwrap_cmd(eval_cmd, codebase_dir, allow_network, tmpdir)
+
+
+def _check_sandbox_available() -> None:
+    """Raise RuntimeError if no sandbox backend is usable on this platform."""
+    if sys.platform == "win32":
+        raise RuntimeError(
+            "Sandboxing is not supported on Windows: zerobox does not "
+            "yet have a Windows backend.\n"
+            "  Pass --disable-sandbox to run without sandboxing, OR\n"
+            "  Run treevee under WSL2 where the Linux backend works."
+        )
+    if sys.platform == "darwin":
+        if _find_zerobox() is None:
+            raise RuntimeError(
+                "zerobox not found. Install it to use sandboxing on macOS.\n"
+                "  pip install zerobox        (also bundles the CLI)\n"
+                "  brew install zerobox\n"
+                "  Or pass --disable-sandbox to run without sandboxing."
+            )
+        return
+    # Linux (and other Unix)
+    if shutil.which("bwrap") is None:
+        raise RuntimeError(
+            "bubblewrap (bwrap) not found. Install it to use sandboxing.\n"
+            "  Debian/Ubuntu: apt install bubblewrap\n"
+            "  Fedora/RHEL:   dnf install bubblewrap\n"
+            "  Arch:          pacman -S bubblewrap\n"
+            "  Or pass --disable-sandbox to run without sandboxing."
+        )
 
 
 # ────────────────────────────────────────────────────────────
@@ -235,9 +328,10 @@ class Evaluator:
             eval_cmd: Shell command to execute (e.g., "pixi run python eval.py").
             eval_timeout: Maximum execution time in seconds.
             codebase_dir: Working directory to run from (for pixi env resolution).
-            sandbox: Run the eval command inside a bubblewrap sandbox (default: True).
+            sandbox: Run the eval command inside the platform-native sandbox
+                (bwrap on Linux, zerobox/Seatbelt on macOS) (default: True).
             allow_network: Allow network access inside the sandbox (default: True).
-            tmpdir: Directory to bind as /tmp inside the sandbox (default: "/tmp").
+            tmpdir: Writable temp directory; exported as TMPDIR inside the sandbox (default: "/tmp").
         """
         self.eval_cmd = eval_cmd
         self.eval_timeout = eval_timeout
@@ -247,14 +341,12 @@ class Evaluator:
         self.tmpdir = tmpdir
 
         if sandbox:
-            if shutil.which("bwrap") is None:
-                raise RuntimeError(
-                    "bubblewrap (bwrap) not found. Install it to use sandboxing.\n"
-                    "  Debian/Ubuntu: apt install bubblewrap\n"
-                    "  Fedora/RHEL:   dnf install bubblewrap\n"
-                    "  Arch:          pacman -S bubblewrap\n"
-                    "  macOS:         not supported (Linux-only)\n"
-                    "  Or pass --disable-sandbox to run without sandboxing."
+            _check_sandbox_available()
+            if sys.platform == "darwin":
+                _run_logger.warning(
+                    "macOS sandboxing via zerobox/Seatbelt is experimental. "
+                    "Please report any issues at "
+                    "https://github.com/lambdaloop/treevee/issues"
                 )
 
     def run(self) -> EvalResult:
@@ -271,7 +363,7 @@ class Evaluator:
         proc = None
         try:
             if self.sandbox:
-                cmd = _build_bwrap_cmd(
+                cmd = _build_sandbox_cmd(
                     self.eval_cmd, self.codebase_dir, self.allow_network, self.tmpdir
                 )
                 shell = False
@@ -279,7 +371,7 @@ class Evaluator:
                 cmd = self.eval_cmd
                 shell = True
 
-            env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+            env = {**os.environ, "PYTHONUNBUFFERED": "1", "TMPDIR": str(self.tmpdir)}
             # start_new_session=True puts the process in its own process
             # group so that kill() terminates not just the child shell but
             # also any subprocesses it spawns (e.g. pixi/env processes).
@@ -3869,7 +3961,7 @@ def _add_run_args(subparser: argparse.ArgumentParser) -> None:
         "--disable-sandbox",
         action="store_false",
         dest="sandbox",
-        help="Disable bubblewrap sandboxing for the eval command "
+        help="Disable sandboxing for the eval command "
              "(runs eval with full host access)",
     )
     subparser.add_argument(
@@ -3886,7 +3978,7 @@ def _add_run_args(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
         "--tmpdir",
         default="/tmp",
-        help="Directory to bind as /tmp inside the bubblewrap sandbox (default: /tmp)",
+        help="Writable temp directory; exposed as TMPDIR inside the sandbox (default: /tmp)",
     )
 
 
@@ -4095,11 +4187,11 @@ def _cmd_run(args: argparse.Namespace) -> None:
         sandbox = getattr(args, "sandbox", True)
         allow_network = getattr(args, "allow_network", True)
         if sandbox:
-            bwrap_args = _build_bwrap_cmd(
+            sandbox_args = _build_sandbox_cmd(
                 eval_cmd, codebase_root.resolve(), allow_network,
                 tmpdir=getattr(args, "tmpdir", "/tmp"),
             )
-            print(shlex.join(bwrap_args))
+            print(shlex.join(sandbox_args))
         else:
             print(eval_cmd)
         return
@@ -4256,7 +4348,7 @@ treevee iteratively improves code using large language models and Monte Carlo Tr
 4. Run an eval command to compute a score
 5. Repeat — building a tree of solutions
 
-The planner LLM only has read access. The editor LLM can only edit files in the `experiment/` subfolder. The eval command runs in a sandbox using bubblewrap.
+The planner LLM only has read access. The editor LLM can only edit files in the `experiment/` subfolder. The eval command runs in a platform-native sandbox: bubblewrap on Linux, zerobox/Seatbelt on macOS.
 
 ---
 

@@ -27,9 +27,12 @@ fusion_min_iters = 10     # Minimum iterations before fusion is allowed (default
 fusion_prob = 0.5         # Probability of using fusion after min iters (default: 0.5)
 
 # ── Sandboxing ───────────────────────────────────────────────────
-sandbox = true             # Run eval inside bubblewrap sandbox (default: true)
+sandbox = true             # Run eval inside the platform-native sandbox (default: true)
+                           # Linux: bubblewrap. macOS: zerobox (Seatbelt). Windows: not supported.
 allow_network = true       # Allow network access inside the sandbox (default: true)
-tmpdir = "/tmp"            # Directory to bind as /tmp inside the sandbox (default: /tmp)
+tmpdir = "/tmp"            # Writable temp directory.
+                           # Linux: bind-mounted as /tmp inside the sandbox.
+                           # macOS: exposed via TMPDIR — code that hardcodes "/tmp/..." will fail unless this stays at /tmp.
 
 # ── Misc ─────────────────────────────────────────────────────────
 verbose = false  # Print LLM agent output in real-time (default: false)

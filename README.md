@@ -136,7 +136,7 @@ Some mechanisms to prevent the LLM loop from going wild:
 - planner only has read and web search access
 - editor can only edit the experiment/ subfolder
 - neither planner nor editor can run bash scripts
-- the evaluation command is run in a sandbox using bubblewrap so it can only edit files in project folder
+- the evaluation command is run in a sandbox so it can only edit files in the project folder. Linux uses [bubblewrap](https://github.com/containers/bubblewrap) (`apt install bubblewrap` etc.); macOS uses [zerobox](https://github.com/afshinm/zerobox) (Seatbelt under the hood — `pip install zerobox`); Windows isn't yet supported, so pass `--disable-sandbox` or run treevee under WSL2.
 
 ## Questions
 
