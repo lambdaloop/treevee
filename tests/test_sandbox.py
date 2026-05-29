@@ -23,6 +23,7 @@ from treevee.treevee import (
     _build_sandbox_cmd,
     _build_zerobox_cmd,
     _find_zerobox,
+    _passwd_home_cache,
 )
 
 
@@ -37,13 +38,16 @@ HAS_ZEROBOX = shutil.which("zerobox") is not None or (
 
 @pytest.fixture
 def codebase_dir():
-    """Integration-test codebase dir, outside /tmp.
+    """Integration-test codebase dir, outside /tmp and outside ~/.cache.
 
     pytest's tmp_path lives under /tmp, but on macOS that would land
     under a profile-allowed read path which can interact poorly with
-    zerobox's policy checks. Use ~/.cache/treevee-tests/... instead.
+    zerobox's policy checks. ~/.cache is also unsuitable — the sandbox
+    binds it writable for pixi/rattler/UV, which would make every
+    sibling of codebase_dir writable and defeat escape-protection tests.
+    Use ~/.local/share/treevee-tests/... instead.
     """
-    base = Path.home() / ".cache" / "treevee-tests"
+    base = Path.home() / ".local" / "share" / "treevee-tests"
     base.mkdir(parents=True, exist_ok=True)
     d = Path(tempfile.mkdtemp(dir=base))
     yield d
@@ -84,6 +88,17 @@ def test_build_bwrap_cmd_custom_tmpdir(tmp_path: Path):
     assert cmd[cmd.index(str(custom_tmp)) + 1] == "/tmp"
 
 
+def test_build_bwrap_cmd_binds_passwd_home_cache(tmp_path: Path):
+    # pixi/rattler/UV resolve $HOME via getpwuid (not the HOME env var) and
+    # write resolver state under {passwd_home}/.cache. With --ro-bind / that
+    # path is read-only and the eval fails with EROFS before Python starts.
+    # The builder must bind it RW at the same path.
+    cmd = _build_bwrap_cmd("true", tmp_path, tmpdir="/tmp")
+    cache = str(_passwd_home_cache())
+    pairs = list(zip(cmd, cmd[1:], cmd[2:]))
+    assert ("--bind", cache, cache) in pairs
+
+
 # ────────────────────────────────────────────────────────────
 # zerobox argv builder (macOS)
 # ────────────────────────────────────────────────────────────
@@ -94,7 +109,7 @@ def test_build_zerobox_cmd_defaults(tmp_path: Path):
     assert Path(cmd[0]).name == "zerobox"
     assert "--profile" in cmd
     assert "--allow-read=/" in cmd
-    assert f"--allow-write={tmp_path},/tmp" in cmd
+    assert f"--allow-write={tmp_path},/tmp,{_passwd_home_cache()}" in cmd
     assert "-C" in cmd and str(tmp_path) in cmd
     assert "--allow-env" in cmd
     assert "--allow-net" in cmd

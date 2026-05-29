@@ -191,6 +191,16 @@ def _find_zerobox() -> str | None:
     return None
 
 
+def _passwd_home_cache() -> Path:
+    """The real `~/.cache` as seen by tools that resolve HOME via getpwuid
+    (pixi/rattler/UV), not via the HOME env var. Created if missing."""
+    import pwd
+    home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    cache = home / ".cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    return cache
+
+
 def _build_bwrap_cmd(
     eval_cmd: str,
     codebase_dir: Path,
@@ -204,11 +214,13 @@ def _build_bwrap_cmd(
     access. eval_cmd runs via sh -c.
     """
     Path(tmpdir).mkdir(parents=True, exist_ok=True)
+    cache_dir = str(_passwd_home_cache())
     bwrap_args = [
         "bwrap",
         "--ro-bind", "/", "/",
         "--bind", str(codebase_dir), str(codebase_dir),
         "--bind", tmpdir, "/tmp",
+        "--bind", cache_dir, cache_dir,
         "--dev-bind", "/dev", "/dev",
         "--proc", "/proc",
         "--chdir", str(codebase_dir),
@@ -237,11 +249,12 @@ def _build_zerobox_cmd(
     Evaluator.run) since zerobox can't bind-remap paths.
     """
     Path(tmpdir).mkdir(parents=True, exist_ok=True)
+    cache_dir = _passwd_home_cache()
     args = [
         _find_zerobox() or "zerobox",
         "--profile", "system-read-macos",
         "--allow-read=/",
-        f"--allow-write={codebase_dir},{tmpdir}",
+        f"--allow-write={codebase_dir},{tmpdir},{cache_dir}",
         "-C", str(codebase_dir),
         # Inherit the full host env (PATH, HOME, TMPDIR, …) — matches
         # bwrap's behavior of running with an unfiltered env.
